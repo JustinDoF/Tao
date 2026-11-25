@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#131a1f"/>
+      <stop offset="1" stop-color="#0a0d0f"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#c9a961" stop-opacity=".28"/>
+      <stop offset="1" stop-color="#c9a961" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="210" fill="url(#glow)"/>
+
+  <!-- 六宫环 -->
+  <circle cx="256" cy="256" r="169" fill="none" stroke="#c9a961" stroke-opacity=".55" stroke-width="4"/>
+  <circle cx="256" cy="256" r="74" fill="none" stroke="#c9a961" stroke-opacity=".3" stroke-width="2.5"/>
+
+  <!-- 六宫位 -->
+  <g fill="#d6b76b">
+    <circle cx="256" cy="87"  r="25"/>
+    <circle cx="402" cy="171" r="25" fill-opacity=".86"/>
+    <circle cx="402" cy="341" r="25" fill-opacity=".86"/>
+    <circle cx="256" cy="425" r="25" fill-opacity=".86"/>
+    <circle cx="110" cy="341" r="25" fill-opacity=".86"/>
+    <circle cx="110" cy="171" r="25" fill-opacity=".86"/>
+  </g>
+
+  <!-- 中央三横（乾） -->
+  <g fill="#e3cb94">
+    <rect x="178" y="229" width="156" height="10" rx="5"/>
+    <rect x="178" y="251" width="156" height="10" rx="5"/>
+    <rect x="178" y="273" width="156" height="10" rx="5"/>
+  </g>
+</svg>
