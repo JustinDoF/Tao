@@ -669,6 +669,12 @@ body::before {
   color: var(--gold-hi);
   background: rgba(201, 169, 97, 0.08);
 }
+.rec-seal.mh {
+  color: #d8c48a;
+  border-color: rgba(201, 169, 97, 0.3);
+  background: rgba(201, 169, 97, 0.1);
+  font-size: 13px;
+}
 .rec-body { flex: 1; min-width: 0; }
 .rec-q {
   font-size: 13.5px;
@@ -730,6 +736,60 @@ body::before {
 }
 .mcard.active .m-tag { background: rgba(178, 58, 48, 0.2); color: #e4786c; border: 1px solid rgba(178, 58, 48, 0.35); }
 .mcard.locked .m-tag { background: rgba(255, 255, 255, 0.06); color: #6f7677; }
+
+/* ---------------- 梅花易数 ---------------- */
+.mh-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.mh-svg {
+  flex: 0 0 auto;
+  padding: 6px 4px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--line-2);
+}
+.mh-svg svg { display: block; }
+.mh-info { flex: 1; min-width: 0; }
+
+.mh-trio {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 9px;
+}
+.mh-mini {
+  text-align: center;
+  padding: 11px 4px 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line-2);
+}
+.mh-mini svg { display: block; margin: 0 auto; }
+.mm-label {
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  color: var(--gold-dim);
+  margin-bottom: 8px;
+}
+.mm-name {
+  font-family: var(--serif);
+  font-size: 15px;
+  letter-spacing: 2px;
+  color: var(--txt);
+  margin-top: 8px;
+}
+
+/* 术法卡片：可用未选中 */
+.mcard.ready { border-color: rgba(201, 169, 97, 0.26); }
+.mcard.ready .m-name { color: var(--gold); }
+.mcard.ready .m-tag {
+  background: rgba(201, 169, 97, 0.14);
+  color: var(--gold);
+  border: 1px solid rgba(201, 169, 97, 0.3);
+}
+.mcard.ready:active { transform: scale(0.985); }
+.mcard { transition: transform 0.14s; }
 
 /* ---------------- 底部导航 ---------------- */
 .tabbar {

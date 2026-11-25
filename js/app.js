@@ -8,6 +8,8 @@
   var META = window.LiuRenData.phaseMeta;
   var L = window.Lunar;
   var R = window.LiuRen;
+  var MH = window.Meihua;
+  var MHD = window.MeihuaData;
 
   var $ = function (s, r) { return (r || document).querySelector(s); };
   var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
@@ -16,12 +18,18 @@
 
   var S = {
     page: 'cast',
+    art: 'liuren',           // 当前术法：liuren | meihua
     method: 'time',
+    mhMethod: 'time',        // 梅花起卦方式：time | num | rand
+    mhNums: ['', ''],
+    mhManual: false,
+    mhManualVals: null,
     manual: false,
     nums: ['', '', ''],
     question: '',
     manualVals: null,
     result: null,
+    mhResult: null,
     basis: '',
     ts: 0,
     history: [],
@@ -36,11 +44,12 @@
       var d = JSON.parse(raw);
       if (Array.isArray(d.history)) S.history = d.history;
       if (d.settings) S.settings = Object.assign(S.settings, d.settings);
+      if (d.art === 'liuren' || d.art === 'meihua') S.art = d.art;
     } catch (e) { /* 忽略 */ }
   }
   function saveStore() {
     try {
-      localStorage.setItem(STORE, JSON.stringify({ history: S.history, settings: S.settings }));
+      localStorage.setItem(STORE, JSON.stringify({ history: S.history, settings: S.settings, art: S.art }));
     } catch (e) { /* 忽略 */ }
   }
 
@@ -325,6 +334,7 @@
     // 记入课录
     S.history.unshift({
       id: String(S.ts) + Math.random().toString(36).slice(2, 6),
+      art: 'liuren',
       ts: S.ts,
       q: S.question,
       mode: modeNice,
@@ -616,6 +626,20 @@
       return '<div class="empty"><div class="glyph">空</div><p>尚无课录。<br>起一课后，此处自留痕迹。</p></div>';
     }
     var list = S.history.map(function (h) {
+      if (h.art === 'meihua') {
+        var m = h.mh || {};
+        var rr = m.a
+          ? MH.castByNumbers(m.a, m.b)
+          : MH.castByTime(m.zhi || 1, m.month || 1, m.day || 1, m.shichen || 1);
+        return '<div class="rec" data-id="' + h.id + '">'
+          + '<div class="rec-seal mh">' + rr.ben.short + '</div>'
+          + '<div class="rec-body">'
+          + '  <div class="rec-q">' + (h.q ? esc(h.q) : '<span style="color:#6f7676">未记所问</span>') + '</div>'
+          + '  <div class="rec-meta">' + fmtDate(h.ts) + ' · 梅花 · ' + h.mode + ' · ' + rr.verdict.tone.label + '</div>'
+          + '</div>'
+          + '<div class="rec-arrow">›</div>'
+          + '</div>';
+      }
       var r = R.castFromCounts(h.counts);
       return '<div class="rec" data-id="' + h.id + '">'
         + '<div class="rec-seal">' + r.main.name + '</div>'
@@ -635,10 +659,19 @@
   function openRecord(id) {
     var h = S.history.filter(function (x) { return x.id === id; })[0];
     if (!h) return;
-    var res = R.castFromCounts(h.counts);
     S.ts = h.ts;
+    var body;
+    if (h.art === 'meihua') {
+      var m = h.mh || {};
+      var rr = m.a
+        ? MH.castByNumbers(m.a, m.b)
+        : MH.castByTime(m.zhi || 1, m.month || 1, m.day || 1, m.shichen || 1);
+      body = mhResultHTML(rr, h.basis, h.q);
+    } else {
+      body = resultHTML(R.castFromCounts(h.counts), h.basis, h.q);
+    }
     openSheet('课 录', fmtDate(h.ts),
-      '<div>' + resultHTML(res, h.basis, h.q).replace('<div class="row-actions">', '<div class="row-actions" style="display:none">') + '</div>'
+      '<div>' + body.replace('<div class="row-actions">', '<div class="row-actions" style="display:none">') + '</div>'
       + '<button class="danger-btn" id="delRec" style="margin-top:16px">删除此课</button>');
     var del = $('#delRec');
     if (del) del.onclick = function () {
@@ -651,21 +684,443 @@
   }
 
   /* ==========================================================
+     梅花易数
+     ========================================================== */
+  function bindMethodCards() {
+    $$('.mcard[data-art]').forEach(function (el) {
+      el.onclick = function () {
+        var a = el.getAttribute('data-art');
+        if (S.art === a) { S.page = 'cast'; window.scrollTo(0, 0); renderPage(); return; }
+        S.art = a;
+        S.page = 'cast';
+        S.question = '';
+        S.result = null;
+        S.mhResult = null;
+        saveStore();
+        window.scrollTo(0, 0);
+        renderPage();
+        toast('已切换至' + (a === 'meihua' ? '梅花易数' : '小六壬'));
+      };
+    });
+  }
+
+  function mhCastPageHTML() {
+    return ''
+      + '<div class="segment" id="segMh">'
+      + '  <button data-m="time">时间起卦</button>'
+      + '  <button data-m="num">数字起卦</button>'
+      + '  <button data-m="rand">随机起卦</button>'
+      + '</div>'
+      + '<div id="mhMethodBox"></div>'
+      + '<div id="mhResultBox"></div>';
+  }
+
+  function mhTimePanelHTML() {
+    return ''
+      + '<div class="card gold-line">'
+      + '  <div class="now-block">'
+      + '    <div class="now-lunar" id="mhLunarBig">—</div>'
+      + '    <div class="now-solar" id="mhSolarLine">—</div>'
+      + '    <div class="now-shichen" id="mhSumTip">—</div>'
+      + '  </div>'
+      + '  <div class="mini-row">'
+      + '    <button class="mini-btn on" id="mhBtnNow">用此刻</button>'
+      + '    <button class="mini-btn" id="mhBtnManual">另择时刻</button>'
+      + '  </div>'
+      + '  <div id="mhManualBox"></div>'
+      + '</div>'
+      + '<input class="q-input" id="mhQ" maxlength="40" placeholder="所问何事（可略，如：此事可否成）">'
+      + '<button class="cast-btn" id="mhCastBtn">起　卦</button>';
+  }
+
+  function mhManualHTML() {
+    var v = S.mhManualVals || (function () {
+      var t = L.fromDate(new Date(), S.settings);
+      return { zhi: zhiIndexOf(t.ganzhi), month: t.month, day: t.day, shichen: t.hour };
+    })();
+    var zOpts = '', mOpts = '', dOpts = '', hOpts = '';
+    for (var i = 1; i <= 12; i++) zOpts += '<option value="' + i + '"' + (i === v.zhi ? ' selected' : '') + '>' + L.SHICHEN[i - 1] + '</option>';
+    for (var j = 1; j <= 12; j++) mOpts += '<option value="' + j + '"' + (j === v.month ? ' selected' : '') + '>' + L.monthName(j, false) + '</option>';
+    for (var k = 1; k <= 30; k++) dOpts += '<option value="' + k + '"' + (k === v.day ? ' selected' : '') + '>' + L.dayName(k) + '</option>';
+    for (var n = 1; n <= 12; n++) hOpts += '<option value="' + n + '"' + (n === v.shichen ? ' selected' : '') + '>' + L.SHICHEN[n - 1] + '时</option>';
+
+    return ''
+      + '<div class="manual">'
+      + '  <div class="three">'
+      + '    <div class="field"><label>年支</label><select id="mhZhi">' + zOpts + '</select></div>'
+      + '    <div class="field"><label>农历月</label><select id="mhM">' + mOpts + '</select></div>'
+      + '    <div class="field"><label>农历日</label><select id="mhD">' + dOpts + '</select></div>'
+      + '  </div>'
+      + '  <div class="field"><label>时辰</label><select id="mhH">' + hOpts + '</select></div>'
+      + '  <p class="hint" id="mhRange"></p>'
+      + '</div>';
+  }
+
+  function mhNumPanelHTML() {
+    return ''
+      + '<div class="card gold-line">'
+      + '  <div class="num-grid" style="grid-template-columns:1fr 1fr">'
+      + '    <div class="num-cell"><span>上 卦 数</span><input id="mhn0" inputmode="numeric" maxlength="4" placeholder="—" value="' + esc(S.mhNums[0]) + '"></div>'
+      + '    <div class="num-cell"><span>下 卦 数</span><input id="mhn1" inputmode="numeric" maxlength="4" placeholder="—" value="' + esc(S.mhNums[1]) + '"></div>'
+      + '  </div>'
+      + '  <p class="hint" style="margin-top:12px">心中默事，随口报两数。上卦以<b>一数÷8</b>取余，下卦以<b>二数÷8</b>取余，动爻以<b>两数之和÷6</b>取余（余 0 则取满数）。</p>'
+      + '</div>'
+      + '<input class="q-input" id="mhQ" maxlength="40" placeholder="所问何事（可略）">'
+      + '<button class="cast-btn" id="mhCastBtn">起　卦</button>';
+  }
+
+  function mhRandPanelHTML() {
+    return ''
+      + '<div class="card gold-line">'
+      + '  <p class="hint">不必取数。凝神静气，将所问之事默念三遍，按下起卦。<br>随机取年月日时之数，与时间起卦同法。</p>'
+      + '  <p class="hint" style="margin-top:10px;color:#6f7576">一卦只问一事，一事不可重问。心诚则灵，疑则勿卜。</p>'
+      + '</div>'
+      + '<input class="q-input" id="mhQ" maxlength="40" placeholder="所问何事（可略）">'
+      + '<button class="cast-btn" id="mhCastBtn">起　卦</button>';
+  }
+
+  function zhiIndexOf(ganzhi) {
+    if (!ganzhi) return 1;
+    var z = ganzhi.charAt(1);
+    var i = L.SHICHEN.indexOf(z);
+    return i >= 0 ? i + 1 : 1;
+  }
+
+  function renderMeihuaPage() {
+    var view = $('#view');
+    view.innerHTML = mhCastPageHTML();
+    setSubtitle('梅花易数 · 体用生克');
+
+    $$('#segMh button').forEach(function (b) {
+      b.classList.toggle('on', b.getAttribute('data-m') === S.mhMethod);
+      b.onclick = function () {
+        if (S.mhMethod === b.getAttribute('data-m')) return;
+        S.mhMethod = b.getAttribute('data-m');
+        $$('#segMh button').forEach(function (x) { x.classList.toggle('on', x === b); });
+        renderMhPanel();
+        $('#mhResultBox').innerHTML = '';
+      };
+    });
+    renderMhPanel();
+  }
+
+  function renderMhPanel() {
+    var box = $('#mhMethodBox');
+    if (!box) return;
+    if (S.mhMethod === 'time') box.innerHTML = mhTimePanelHTML();
+    else if (S.mhMethod === 'num') box.innerHTML = mhNumPanelHTML();
+    else box.innerHTML = mhRandPanelHTML();
+
+    if (S.mhMethod === 'time') {
+      updateMhTime();
+      if (S.mhManual) showMhManual();
+      $('#mhBtnNow').onclick = function () {
+        S.mhManual = false;
+        S.mhManualVals = null;
+        $$('.mini-btn').forEach(function (b) { b.classList.toggle('on', b.id === 'mhBtnNow'); });
+        $('#mhManualBox').innerHTML = '';
+        updateMhTime();
+      };
+      $('#mhBtnManual').onclick = function () { S.mhManual = true; showMhManual(); };
+    }
+
+    if (S.mhMethod === 'num') {
+      ['mhn0', 'mhn1'].forEach(function (id, i) {
+        var el = $('#' + id);
+        if (!el) return;
+        el.oninput = function () {
+          var v = this.value.replace(/[^\d]/g, '').slice(0, 4);
+          if (v !== this.value) this.value = v;
+          S.mhNums[i] = v;
+        };
+      });
+    }
+
+    if ($('#mhCastBtn')) $('#mhCastBtn').onclick = mhDoCast;
+  }
+
+  function showMhManual() {
+    var box = $('#mhManualBox');
+    box.innerHTML = mhManualHTML();
+    $$('.mini-btn').forEach(function (b) { b.classList.toggle('on', b.id === 'mhBtnManual'); });
+    var v = S.mhManualVals || (function () {
+      var t = L.fromDate(new Date(), S.settings);
+      return { zhi: zhiIndexOf(t.ganzhi), month: t.month, day: t.day, shichen: t.hour };
+    })();
+    $('#mhZhi').value = v.zhi; $('#mhM').value = v.month; $('#mhD').value = v.day; $('#mhH').value = v.shichen;
+
+    function sync() {
+      S.mhManualVals = {
+        zhi: +$('#mhZhi').value, month: +$('#mhM').value,
+        day: +$('#mhD').value, shichen: +$('#mhH').value
+      };
+      var r = $('#mhRange');
+      if (r) r.textContent = '此时段：' + L.SHICHEN_RANGE[S.mhManualVals.shichen - 1];
+      updateMhTime();
+    }
+    ['#mhZhi', '#mhM', '#mhD', '#mhH'].forEach(function (s) {
+      var el = $(s); if (el) el.onchange = sync;
+    });
+    var r0 = $('#mhRange');
+    if (r0) r0.textContent = '此时段：' + L.SHICHEN_RANGE[v.shichen - 1];
+    updateMhTime();
+  }
+
+  function updateMhTime() {
+    if (S.art !== 'meihua' || S.page !== 'cast' || S.mhMethod !== 'time') return;
+    var big = $('#mhLunarBig');
+    if (!big) return;
+
+    var v, zhi;
+    if (S.mhManual && S.mhManualVals) {
+      v = S.mhManualVals;
+      zhi = v.zhi;
+      big.innerHTML = esc(L.monthName(v.month, false) + L.dayName(v.day)) + '<small> ' + L.SHICHEN[v.shichen - 1] + '时</small>';
+      $('#mhSolarLine').textContent = '手动选定 · 年支 ' + L.SHICHEN[zhi - 1] + '、月 ' + v.month + '、日 ' + v.day + '、时 ' + v.shichen;
+    } else {
+      var t = L.fromDate(new Date(), S.settings);
+      if (!t) return;
+      zhi = zhiIndexOf(t.ganzhi);
+      v = { month: t.month, day: t.day, shichen: t.hour };
+      big.innerHTML = esc(t.ganzhi + '年 ' + t.monthName + t.dayName) + '<small> ' + t.shichen + '时</small>';
+      $('#mhSolarLine').textContent = t.solar.y + '年' + t.solar.m + '月' + t.solar.d + '日 ' + pad(t.solar.h) + ':' + pad(t.solar.mi) + ' · 公历';
+    }
+
+    var s1 = zhi + v.month + v.day;
+    var s2 = s1 + v.shichen;
+    var tip = $('#mhSumTip');
+    if (tip) tip.textContent = s1 + '÷8 余 ' + MH.mod(s1, 8) + ' · ' + s2 + '÷8 余 ' + MH.mod(s2, 8) + ' · ÷6 余 ' + MH.mod(s2, 6);
+  }
+
+  function mhDoCast() {
+    var q = $('#mhQ');
+    S.question = q ? q.value.trim() : '';
+    var now = new Date();
+    var res, basis, modeNice;
+
+    if (S.mhMethod === 'time') {
+      var zhi, mo, dy, sh;
+      if (S.mhManual && S.mhManualVals) {
+        var v = S.mhManualVals;
+        zhi = v.zhi; mo = v.month; dy = v.day; sh = v.shichen;
+        basis = '年支' + L.SHICHEN[zhi - 1] + '（' + zhi + '）· 农历' + L.monthName(mo, false) + L.dayName(dy)
+          + ' · ' + L.SHICHEN[sh - 1] + '时（' + sh + '）· 手动择时';
+      } else {
+        var t = L.fromDate(now, S.settings);
+        if (!t) { toast('时间换算失败'); return; }
+        zhi = zhiIndexOf(t.ganzhi);
+        mo = t.month; dy = t.day; sh = t.hour;
+        basis = t.ganzhi + '年（' + L.SHICHEN[zhi - 1] + '）' + t.monthName + t.dayName + ' ' + t.shichen + '时'
+          + ' · ' + t.solar.y + '年' + t.solar.m + '月' + t.solar.d + '日 ' + pad(t.solar.h) + ':' + pad(t.solar.mi);
+      }
+      res = MH.castByTime(zhi, mo, dy, sh);
+      modeNice = '时间起卦';
+    } else if (S.mhMethod === 'num') {
+      var a = parseInt(String(S.mhNums[0]).trim(), 10);
+      var b = parseInt(String(S.mhNums[1]).trim(), 10);
+      if (!isFinite(a) || a < 1) a = 1;
+      if (!isFinite(b) || b < 1) b = 1;
+      res = MH.castByNumbers(a, b);
+      basis = '报数 ' + a + ' · ' + b + '　上卦 ' + a + '÷8 余 ' + MH.mod(a, 8) + ' 取' + res.up.name
+        + '，下卦 ' + b + '÷8 余 ' + MH.mod(b, 8) + ' 取' + res.low.name
+        + '，动爻 (' + a + '+' + b + ')÷6 余 ' + MH.mod(a + b, 6);
+      modeNice = '数字起卦';
+    } else {
+      res = MH.castRandom();
+      var m = res.meta;
+      basis = '随机得数：年支' + m.zhiIndex + ' · 月' + m.month + ' · 日' + m.day + ' · 时' + m.shichen
+        + '　（' + m.zhiIndex + '+' + m.month + '+' + m.day + '=' + m.sum1 + '，再加' + m.shichen + '=' + m.sum2 + '）';
+      modeNice = '随机起卦';
+    }
+
+    S.mhResult = res;
+    S.basis = basis;
+    S.ts = now.getTime();
+
+    S.history.unshift({
+      id: String(S.ts) + Math.random().toString(36).slice(2, 6),
+      art: 'meihua',
+      ts: S.ts,
+      q: S.question,
+      mode: modeNice,
+      basis: basis,
+      mh: { zhi: res.meta.zhiIndex, month: res.meta.month, day: res.meta.day, shichen: res.meta.shichen, a: res.meta.a, b: res.meta.b }
+    });
+    if (S.history.length > 60) S.history.length = 60;
+    saveStore();
+
+    var box = $('#mhResultBox');
+    box.innerHTML = mhResultHTML(res, basis, S.question);
+    bindMhActions(res);
+    setTimeout(function () {
+      var y = box.getBoundingClientRect().top + window.scrollY - 74;
+      window.scrollTo({ top: y, behavior: 'smooth' });
+    }, 60);
+  }
+
+  /* ---------------- 卦象 SVG ---------------- */
+  function hexSVG(lines, dong, opt) {
+    opt = opt || {};
+    var W = 150, H = 138;
+    var cx = 75, barW = 92, halfW = 40, gap = 12;
+    var bh = 9, step = 20, top = 15;
+    var out = '';
+    for (var i = 0; i < 6; i++) {      // i=0 初爻（最下）
+      var y = top + (5 - i) * step;
+      var isDong = dong === i + 1;
+      var col = opt.mono ? (opt.dim ? '#9c968a' : '#b6b0a4') : (isDong ? '#e6cf92' : '#a9a49a');
+      var op = opt.dim ? '0.9' : '1';
+      if (lines[i]) {
+        out += '<rect x="' + (cx - barW / 2) + '" y="' + y + '" width="' + barW + '" height="' + bh
+          + '" rx="1.5" fill="' + col + '" opacity="' + op + '"/>';
+      } else {
+        out += '<rect x="' + (cx - barW / 2) + '" y="' + y + '" width="' + halfW + '" height="' + bh
+          + '" rx="1.5" fill="' + col + '" opacity="' + op + '"/>';
+        out += '<rect x="' + (cx - barW / 2 + halfW + gap) + '" y="' + y + '" width="' + halfW + '" height="' + bh
+          + '" rx="1.5" fill="' + col + '" opacity="' + op + '"/>';
+      }
+      if (isDong && !opt.mono && !opt.dim) {
+        var mk = lines[i] ? '○' : '×';
+        out += '<text x="' + (cx + barW / 2 + 11) + '" y="' + (y + bh / 2 + 1) + '" fill="#e2564a"'
+          + ' font-size="11" text-anchor="middle" dominant-baseline="central">' + mk + '</text>';
+      }
+    }
+    return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + (opt.w || 110) + '" height="' + Math.round((opt.w || 110) * H / W) + '"'
+      + ' aria-label="卦象">' + out + '</svg>';
+  }
+
+  function mhResultHTML(r, basis, question) {
+    var rel = r.verdict.rel;
+    var tone = r.verdict.tone;
+    var posName = ['初爻', '二爻', '三爻', '四爻', '五爻', '上爻'][r.dong - 1];
+
+    var trios = ''
+      + '<div class="mh-trio">'
+      + '  <div class="mh-mini"><div class="mm-label">本卦</div>' + hexSVG(r.lines, 0, { mono: true, w: 62 })
+      + '    <div class="mm-name">' + r.ben.short + '</div></div>'
+      + '  <div class="mh-mini"><div class="mm-label">互卦</div>' + hexSVG(MH.hexLines(r.hu), 0, { mono: true, dim: true, w: 62 })
+      + '    <div class="mm-name">' + r.hu.short + '</div></div>'
+      + '  <div class="mh-mini"><div class="mm-label">变卦</div>' + hexSVG(r.bianLines, 0, { mono: true, dim: true, w: 62 })
+      + '    <div class="mm-name">' + (r.bian ? r.bian.short : '—') + '</div></div>'
+      + '</div>';
+
+    var relChips = ''
+      + '<div class="chips">'
+      + '  <span class="chip">体 <b>' + r.ti.name + '</b>' + r.ti.wuxing + '（' + r.tiPos + '）</span>'
+      + '  <span class="chip">用 <b>' + r.yong.name + '</b>' + r.yong.wuxing + '（' + r.yongPos + '）</span>'
+      + '  <span class="chip">动爻 <b>' + posName + '</b></span>'
+      + '</div>';
+
+    var lines = r.verdict.lines.filter(Boolean).map(function (t) {
+      return '<p class="meaning" style="margin:0 0 9px">' + esc(t) + '</p>';
+    }).join('');
+
+    var items = ''
+      + '<div class="items">'
+      + '  <div class="item"><div class="k">体卦</div><div class="v">' + r.ti.name + '（' + r.ti.nature + '·' + r.ti.wuxing + '）　' + r.ti.xiang + '。主己身、主体、主内。</div></div>'
+      + '  <div class="item"><div class="k">用卦</div><div class="v">' + r.yong.name + '（' + r.yong.nature + '·' + r.yong.wuxing + '）　' + r.yong.xiang + '。主所占之事、对方、主外。</div></div>'
+      + '  <div class="item"><div class="k">互卦</div><div class="v">' + r.hu.name + '　事之中程、过程曲折。' + r.huUp.nature + '上' + r.huLow.nature + '下。</div></div>'
+      + '  <div class="item"><div class="k">变卦</div><div class="v">' + (r.bian ? r.bian.name + '　事之终局、最终所归。' : '—') + '</div></div>'
+      + '</div>';
+
+    return ''
+      + '<div class="result">'
+
+      + '  <div class="card gold-line" style="margin-top:16px">'
+      + '    <div class="mh-head">'
+      + '      <div class="mh-svg">' + hexSVG(r.lines, r.dong, { w: 116 }) + '</div>'
+      + '      <div class="mh-info">'
+      + '        <div class="palace-name-row" style="margin-bottom:2px">'
+      + '          <h2 style="font-size:25px;letter-spacing:2px">' + r.ben.name + '</h2>'
+      + '        </div>'
+      + '        <p class="palace-hint" style="margin:4px 0 8px">第 ' + r.ben.n + ' 卦 · 上' + r.up.name + '下' + r.low.name + '</p>'
+      + '        <span class="luck-tag ' + tone.cls + '">' + tone.label + ' · ' + rel.label + '</span>'
+      + '      </div>'
+      + '    </div>'
+      + relChips
+      + '    <p class="meaning" style="margin-top:14px">' + esc(r.verdict.rel.text) + '</p>'
+      + '  </div>'
+
+      + '  <div class="verse-card">'
+      + '    <div class="v-label">卦　辞</div>'
+      + '    <div class="v-text" style="font-size:15px;line-height:1.95">' + esc(r.ben.duan) + '</div>'
+      + '    <div class="verse-seal">梅花<br>易数</div>'
+      + '  </div>'
+
+      + '  <div class="section-title">本 互 变 三 卦</div>'
+      + trios
+
+      + '  <div class="section-title">体 用 断 卦</div>'
+      + '  <div class="card">' + lines
+      + '    <p class="meaning" style="margin-top:4px;color:var(--gold)">' + esc(r.verdict.advice) + '</p>'
+      + '  </div>'
+
+      + '  <div class="section-title">卦 象 详 解</div>'
+      + items
+
+      + '  <div class="basis" style="margin-top:14px">'
+      + '    <b>起卦依据</b>　' + esc(basis) + '<br>'
+      + '    <b>所问</b>　' + (question ? esc(question) : '未填') + '<br>'
+      + '    <b>记时</b>　' + fmtDate(S.ts)
+      + '  </div>'
+
+      + '  <div class="row-actions">'
+      + '    <button id="mhCopy">复制此卦</button>'
+      + '    <button id="mhAgain">再起一卦</button>'
+      + '  </div>'
+
+      + '</div>';
+  }
+
+  function bindMhActions(r) {
+    var c = $('#mhCopy');
+    if (c) c.onclick = function () {
+      var txt = '【梅花易数】' + (S.question ? S.question + '\n' : '')
+        + '本卦：' + r.ben.name + '（第' + r.ben.n + '卦）\n'
+        + '动爻：' + ['初', '二', '三', '四', '五', '上'][r.dong - 1] + '爻\n'
+        + '体：' + r.ti.name + '（' + r.ti.wuxing + '）　用：' + r.yong.name + '（' + r.yong.wuxing + '）\n'
+        + '关系：' + r.verdict.rel.label + '　' + r.verdict.tone.label + '\n'
+        + '互卦：' + r.hu.name + '　变卦：' + (r.bian ? r.bian.name : '—') + '\n'
+        + '卦辞：' + r.ben.duan + '\n'
+        + r.verdict.lines.filter(Boolean).join('\n')
+        + '\n—— 掐指神通 · ' + S.basis;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(txt).then(function () { toast('已复制卦式'); }, function () { fallbackCopy(txt); });
+      } else fallbackCopy(txt);
+    };
+
+    var a = $('#mhAgain');
+    if (a) a.onclick = function () {
+      S.mhResult = null;
+      S.question = '';
+      var q = $('#mhQ');
+      if (q) q.value = '';
+      $('#mhResultBox').innerHTML = '';
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      if (S.mhMethod === 'rand') setTimeout(mhDoCast, 420);
+      else if (S.mhMethod === 'num') { S.mhNums = ['', '']; renderMhPanel(); }
+      else updateMhTime();
+    };
+  }
+
+  /* ==========================================================
      术法页
      ========================================================== */
   var METHODS = [
-    { name: '小六壬', desc: '掐指神通。六宫轮转，三步断事，最便最速。', active: true, tag: '已开' },
-    { name: '梅花易数', desc: '以数起卦，体用生克，观物取象。', tag: '筹备' },
-    { name: '六爻纳甲', desc: '铜钱摇卦，装卦纳甲，六亲六神断吉凶。', tag: '筹备' },
-    { name: '奇门遁甲', desc: '九宫八门，时家起局，择时择方。', tag: '筹备' },
-    { name: '太乙神数', desc: '三式之首，推演国运岁计。', tag: '筹备' },
-    { name: '诸葛神数', desc: '三字数定签，占断人事。', tag: '筹备' }
+    { id: 'liuren', name: '小六壬', desc: '掐指神通。六宫轮转，三步断事，最便最速。', ready: true },
+    { id: 'meihua', name: '梅花易数', desc: '以数起卦，体用生克，互卦变卦观终始。', ready: true },
+    { id: 'liuyao', name: '六爻纳甲', desc: '铜钱摇卦，装卦纳甲，六亲六神断吉凶。' },
+    { id: 'qimen', name: '奇门遁甲', desc: '九宫八门，时家起局，择时择方。' },
+    { id: 'taiyi', name: '太乙神数', desc: '三式之首，推演国运岁计。' },
+    { id: 'zhuge', name: '诸葛神数', desc: '三字数定签，占断人事。' }
   ];
 
   function methodsPageHTML() {
     var grid = METHODS.map(function (m) {
-      return '<div class="mcard ' + (m.active ? 'active' : 'locked') + '">'
-        + '<div class="m-tag">' + m.tag + '</div>'
+      var on = m.ready && S.art === m.id;
+      return '<div class="mcard ' + (m.ready ? (on ? 'active' : 'ready') : 'locked') + '"'
+        + (m.ready ? ' data-art="' + m.id + '" role="button"' : '') + '>'
+        + '<div class="m-tag">' + (m.ready ? (on ? '使用中' : '可用') : '筹备') + '</div>'
         + '<div class="m-name">' + m.name + '</div>'
         + '<div class="m-desc">' + m.desc + '</div>'
         + '</div>';
@@ -674,6 +1129,7 @@
     return ''
       + '<div class="section-title">术 法</div>'
       + '<div class="mgrid">' + grid + '</div>'
+      + '<p class="hint" style="margin-top:10px;text-align:center">点击「可用」的术法即切换，演算页随之更换</p>'
 
       + '<div class="section-title">小 六 壬 法 要</div>'
       + '<div class="card">'
@@ -682,6 +1138,18 @@
       + '    <div class="item"><div class="k">时间课</div><div class="v">大安起正月，顺数至当月；月宫起初一，顺数至当日；日宫起子时，顺数至当下时辰。所落之宫，即断。三步者，天时、地利、人和也。</div></div>'
       + '    <div class="item"><div class="k">报数课</div><div class="v">心中默事，随口报数。一数落天时，二数落地利，三数落人和；单数直断，两数首尾并参。</div></div>'
       + '    <div class="item"><div class="k">取用</div><div class="v">以末宫（人和）定成败，以首宫观起因；三宫皆宜则事顺，首尾相克则先难后易或先吉后凶。</div></div>'
+      + '  </div>'
+      + '</div>'
+
+      + '<div class="section-title">梅 花 易 数 法 要</div>'
+      + '<div class="card">'
+      + '  <p class="meaning" style="font-size:12.5px">取卦不用蓍草，因<em style="font-style:normal;color:var(--gold-hi)">数</em>起卦，观象断事。八卦先天数：乾一、兑二、离三、震四、巽五、坎六、艮七、坤八。</p>'
+      + '  <div class="items" style="margin-top:12px">'
+      + '    <div class="item"><div class="k">时间起卦</div><div class="v">上卦＝（年支序＋月＋日）÷8 取余；下卦＝（年支序＋月＋日＋时）÷8 取余；动爻＝（年支序＋月＋日＋时）÷6 取余。余 0 则取满数（8 或 6）。</div></div>'
+      + '    <div class="item"><div class="k">数字起卦</div><div class="v">心中默事报两数：一数÷8 为上卦，二数÷8 为下卦，两数之和÷6 为动爻。</div></div>'
+      + '    <div class="item"><div class="k">体用</div><div class="v">动爻所在之卦为「用」，另一卦为「体」。体主己身，用主所占之事。动爻在下卦（初二三），则下卦为用、上卦为体；反之亦然。</div></div>'
+      + '    <div class="item"><div class="k">生克</div><div class="v">用生体、体用比和为吉；体克用吉而费力；体生用为耗；用克体为凶。此为断卦之要。</div></div>'
+      + '    <div class="item"><div class="k">互变</div><div class="v">互卦取本卦二三四爻为下、三四五爻为上，观事之中程；变卦为动爻阴阳互易，观事之终局。</div></div>'
       + '  </div>'
       + '</div>'
 
@@ -695,7 +1163,7 @@
       + '  </div>'
       + '</div>'
 
-      + '<p class="foot-note">小六壬属道家民间掌诀，历代口诀流派互有出入，本作采通行本。<br>所出断语为传统文化推演，非科学预测，仅供参详与自省，勿据以决大事、代医疗。</p>';
+      + '<p class="foot-note">小六壬属道家民间掌诀，梅花易数本于邵雍《梅花易数》，历代口诀流派互有出入，本作采通行本。<br>所出断语为传统文化推演，非科学预测，仅供参详与自省，勿据以决大事、代医疗。</p>';
   }
 
   /* ==========================================================
@@ -777,6 +1245,7 @@
   function renderPage() {
     var view = $('#view');
     if (S.page === 'cast') {
+      if (S.art === 'meihua') { renderMeihuaPage(); gotoBottomFix(); return; }
       view.innerHTML = castPageHTML();
       setSubtitle();
       $$('#segMethod button').forEach(function (b) {
@@ -801,7 +1270,12 @@
     } else {
       view.innerHTML = methodsPageHTML();
       setSubtitle('术 法');
+      bindMethodCards();
     }
+    $$('.tab').forEach(function (t) { t.classList.toggle('on', t.getAttribute('data-page') === S.page); });
+  }
+
+  function gotoBottomFix() {
     $$('.tab').forEach(function (t) { t.classList.toggle('on', t.getAttribute('data-page') === S.page); });
   }
 
@@ -821,7 +1295,12 @@
   loadStore();
   renderPage();
   setInterval(function () {
-    if (S.page === 'cast' && S.method === 'time' && !S.manual) updateTimeDisplay();
+    if (S.page !== 'cast') return;
+    if (S.art === 'meihua') {
+      if (S.mhMethod === 'time' && !S.mhManual) updateMhTime();
+    } else if (S.method === 'time' && !S.manual) {
+      updateTimeDisplay();
+    }
   }, 20000);
 
   if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
