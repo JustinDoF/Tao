@@ -1040,6 +1040,148 @@ body::before {
   color: var(--txt-2);
 }
 
+/* ---------------- 罗盘 ---------------- */
+.cmp-btn {
+  width: 100%;
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 13px;
+  border: 1px solid rgba(201, 169, 97, 0.45);
+  background:
+    radial-gradient(120% 140% at 50% 0%, rgba(201, 169, 97, 0.26), rgba(201, 169, 97, 0.05) 55%),
+    linear-gradient(180deg, #2a2318, #1b1913);
+  color: var(--gold-hi);
+  font-family: var(--serif);
+  font-size: 15px;
+  letter-spacing: 4px;
+  cursor: pointer;
+  box-shadow: 0 5px 18px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+.cmp-btn:active { transform: scale(0.985); }
+
+.cmp-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background:
+    radial-gradient(110% 60% at 50% 0%, rgba(201, 169, 97, 0.09), transparent 60%),
+    #0b0e10;
+  display: flex;
+  flex-direction: column;
+  padding: calc(var(--safe-t) + 10px) 16px calc(var(--safe-b) + 14px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  animation: fadeUp 0.24s ease both;
+}
+
+.cmp-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.cmp-title {
+  font-family: var(--serif);
+  font-size: 17px;
+  letter-spacing: 5px;
+  color: var(--gold-hi);
+}
+.cmp-x {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--gold);
+  font-family: var(--sans);
+  font-size: 15px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+.cmp-x:active { background: rgba(201, 169, 97, 0.15); }
+
+.cmp-hint {
+  text-align: center;
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--dim);
+  letter-spacing: 0.5px;
+  margin: 6px 0 0;
+  min-height: 34px;
+}
+
+.cmp-dial-wrap {
+  width: 100%;
+  max-width: 330px;
+  margin: 2px auto 0;
+  aspect-ratio: 1 / 1;
+  touch-action: none;
+  user-select: none;
+}
+.cmp-dial-wrap svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.cmp-lab text { dominant-baseline: central; }
+.cmp-glow { transition: opacity 0.2s; }
+
+.cmp-readout {
+  text-align: center;
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--txt);
+  letter-spacing: 0.5px;
+  margin-top: 4px;
+  min-height: 26px;
+}
+.cmp-readout b {
+  color: var(--gold-hi);
+  font-size: 19px;
+  font-family: var(--serif);
+  letter-spacing: 1px;
+}
+
+.cmp-list {
+  display: grid;
+  gap: 1px;
+  margin-top: 12px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.02);
+}
+.cmp-item {
+  display: grid;
+  grid-template-columns: 58px 1fr 48px 74px;
+  align-items: center;
+  gap: 6px;
+  padding: 11px 13px;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.cmp-item:last-child { border-bottom: 0; }
+.ci-door {
+  font-family: var(--serif);
+  font-size: 13px;
+  letter-spacing: 1px;
+  color: var(--gold-hi);
+}
+.ci-dir { font-size: 13px; color: var(--txt); letter-spacing: 1px; }
+.ci-deg { font-size: 11px; color: var(--dim); text-align: right; }
+.ci-turn {
+  font-size: 11.5px;
+  color: var(--gold);
+  text-align: right;
+  letter-spacing: 0.5px;
+}
+
+.cmp-note {
+  margin: 14px 4px 0;
+  font-size: 10.5px;
+  line-height: 1.9;
+  color: #5f6667;
+  letter-spacing: 0.3px;
+  text-align: center;
+}
+
 /* ---------------- 底部导航 ---------------- */
 .tabbar {
   position: fixed;

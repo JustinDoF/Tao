@@ -14,6 +14,7 @@
   var QMD = window.QimenData;
   var BAI = window.MeihuaBai || {};
   var GL = window.Glossary;
+  var CP = window.Compass;
 
   var $ = function (s, r) { return (r || document).querySelector(s); };
   var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
@@ -741,13 +742,18 @@
         : MH.castByTime(m.zhi || 1, m.month || 1, m.day || 1, m.shichen || 1);
       body = mhResultHTML(rr, h.basis, h.q);
     } else if (h.art === 'qimen') {
-      body = qmResultHTML(QM.cast(new Date(h.qmTime || h.ts)), h.basis, h.q);
+      var qres = QM.cast(new Date(h.qmTime || h.ts));
+      lastQmRes = qres;
+      body = qmResultHTML(qres, h.basis, h.q);
     } else {
       body = resultHTML(R.castFromCounts(h.counts), h.basis, h.q);
     }
     openSheet('课 录', fmtDate(h.ts),
       '<div>' + body.replace('<div class="row-actions">', '<div class="row-actions" style="display:none">') + '</div>'
       + '<button class="danger-btn" id="delRec" style="margin-top:16px">删除此课</button>');
+    // 弹层内仍可从历史课直接开罗盘
+    var ob2 = $('#sheet #openCmp');
+    if (ob2) ob2.onclick = function () { openCompass(lastQmRes); };
     var del = $('#delRec');
     if (del) del.onclick = function () {
       S.history = S.history.filter(function (x) { return x.id !== id; });
@@ -1327,6 +1333,7 @@
     saveStore();
 
     var box = $('#qmResultBox');
+    lastQmRes = r;
     box.innerHTML = qmResultHTML(r, S.basis, S.question);
     var cp = $('#qmCopy');
     if (cp) cp.onclick = function () {
@@ -1411,6 +1418,9 @@
 
       + '  <div class="section-title">吉 门 方 位</div>'
       + '  <div class="items">' + goodList + '</div>'
+      + '  <button class="cmp-btn" id="openCmp">开 罗 盘 · 找 方 位</button>'
+      + '  <p class="hint" style="text-align:center;margin-top:8px;color:#6f7576">'
+      + '用手机方位传感器实时指向，不必另外查方向</p>'
 
       + '  <div class="section-title">取 用</div>'
       + '  <div class="card">'
@@ -1483,6 +1493,297 @@
       + '<span class="bai-sub">九宫盘怎么看</span></div>'
       + lines.map(function (t) { return '<p class="bai-text" style="margin:0 0 10px">' + t + '</p>'; }).join('')
       + '</div>';
+  }
+
+  /* ==========================================================
+     罗盘
+     ========================================================== */
+  var GUA_ANGLE = { '坎': 0, '艮': 45, '震': 90, '巽': 135, '离': 180, '坤': 225, '兑': 270, '乾': 315 };
+  var DIR8 = [
+    { dir: '正北', angle: 0, gua: '坎' }, { dir: '东北', angle: 45, gua: '艮' },
+    { dir: '正东', angle: 90, gua: '震' }, { dir: '东南', angle: 135, gua: '巽' },
+    { dir: '正南', angle: 180, gua: '离' }, { dir: '西南', angle: 225, gua: '坤' },
+    { dir: '正西', angle: 270, gua: '兑' }, { dir: '西北', angle: 315, gua: '乾' }
+  ];
+
+  var cmpState = null;
+  var lastQmRes = null;
+
+  function openCompass(qmRes) {
+    if ($('#cmpLayer')) return;
+
+    // 取九宫方向与门
+    var cells = [];
+    for (var i = 0; i < DIR8.length; i++) {
+      var d8 = DIR8[i];
+      var pn = null;
+      for (var k = 1; k <= 9; k++) {
+        if (QMD.palaces[k].gua === d8.gua) { pn = k; break; }
+      }
+      var cell = pn && qmRes ? qmRes.cells[pn] : null;
+      cells.push({
+        dir: d8.dir, angle: d8.angle, gua: d8.gua, n: pn,
+        door: cell ? cell.door : '',
+        star: cell ? cell.star : '',
+        good: cell ? QMD.goodDoors.indexOf(cell.door) >= 0 : false
+      });
+    }
+
+    var layer = document.createElement('div');
+    layer.id = 'cmpLayer';
+    layer.className = 'cmp-layer';
+    layer.innerHTML = ''
+      + '<div class="cmp-top">'
+      + '  <button class="cmp-x" id="cmpClose" aria-label="关闭">✕</button>'
+      + '  <div class="cmp-title">罗　盘</div>'
+      + '  <button class="cmp-x" id="cmpToggle" aria-label="切换模式" style="font-size:12px;letter-spacing:1px">切换</button>'
+      + '</div>'
+      + '<div class="cmp-hint" id="cmpHint">正在启用方位传感器…</div>'
+      + '<div class="cmp-dial-wrap" id="cmpWrap">'
+      + '  <svg viewBox="0 0 300 300" id="cmpSvg"></svg>'
+      + '</div>'
+      + '<div class="cmp-readout" id="cmpReadout"></div>'
+      + '<div class="cmp-list" id="cmpList"></div>'
+      + '<p class="cmp-note" id="cmpNote"></p>';
+    document.body.appendChild(layer);
+    cmpState = { res: qmRes, cells: cells, unsub: null, manual: false };
+
+    buildDial();
+    $('#cmpClose').onclick = closeCompass;
+    $('#cmpToggle').onclick = function () {
+      cmpState.manual = !cmpState.manual;
+      if (cmpState.manual) {
+        CP.setManual(CP.state.heading);
+        $('#cmpHint').textContent = '手动模式：拖动表盘转动，使「正北」对准实际北方';
+      } else {
+        tryStartSensor();
+      }
+    };
+    var note = $('#cmpNote');
+    if (note) {
+      note.innerHTML = '手机罗盘用磁力计测向，受金属、车辆、磁性手机壳干扰时误差可达 ±15°。'
+        + '判断大致方位够用，若要精确到山向请用专业罗盘。<br>'
+        + (location.protocol === 'https:' ? '' : '非 https 环境无法读取方位传感器。');
+    }
+    bindDialDrag();
+    tryStartSensor();
+  }
+
+  function closeCompass() {
+    var layer = $('#cmpLayer');
+    if (cmpState && cmpState.unsub) cmpState.unsub();
+    CP.stop();
+    if (layer) layer.remove();
+    cmpState = null;
+  }
+
+  function tryStartSensor() {
+    CP.start().then(function (r) {
+      if (!cmpState) return;
+      if (!r.ok) {
+        cmpState.manual = true;
+        $('#cmpHint').textContent = r.reason === 'denied'
+          ? '未授权方位权限。可拖动表盘手动对齐。'
+          : '此设备无方位传感器。拖动表盘手动对齐。';
+      } else {
+        $('#cmpHint').textContent = '转动手机，表盘随之转动　·　红针指向你正前方';
+      }
+      subscribe();
+    });
+  }
+
+  function subscribe() {
+    if (cmpState.unsub) cmpState.unsub();
+    cmpState.unsub = CP.on(function (h) {
+      updateDial(h);
+    });
+  }
+
+  /* ---------------- 表盘 ---------------- */
+  function buildDial() {
+    var svg = $('#cmpSvg');
+    if (!svg) return;
+    var out = '';
+
+    // 刻度环（随朝向旋转）
+    out += '<g id="cmpRing">';
+    out += '<circle cx="150" cy="150" r="144" fill="none" stroke="rgba(201,169,97,.18)" stroke-width="1"/>';
+    for (var t = 0; t < 72; t++) {
+      var a = t * 5 * Math.PI / 180;
+      var major = t % 9 === 0;
+      var r1 = major ? 132 : 138, r2 = 144;
+      var x1 = 150 + r1 * Math.sin(a), y1 = 150 - r1 * Math.cos(a);
+      var x2 = 150 + r2 * Math.sin(a), y2 = 150 - r2 * Math.cos(a);
+      out += '<line x1="' + x1.toFixed(1) + '" y1="' + y1.toFixed(1) + '" x2="' + x2.toFixed(1)
+        + '" y2="' + y2.toFixed(1) + '" stroke="' + (major ? 'rgba(201,169,97,.55)' : 'rgba(201,169,97,.18)')
+        + '" stroke-width="' + (major ? 1.6 : 1) + '"/>';
+    }
+    out += '</g>';
+
+    // 每宫的高亮背景（JS 定位）
+    out += '<g id="cmpGlow"></g>';
+
+    // 方位文字（JS 定位，保持正立）
+    out += '<g id="cmpLabels"></g>';
+
+    // 中心
+    out += '<circle cx="150" cy="150" r="56" fill="rgba(13,16,18,.94)" stroke="rgba(201,169,97,.28)"/>';
+    out += '<text id="cmpDeg" x="150" y="146" text-anchor="middle" fill="#e6cf92"'
+      + ' font-family="var(--serif)" font-size="30" letter-spacing="1">0°</text>';
+    out += '<text id="cmpDirName" x="150" y="170" text-anchor="middle" fill="#9b9488"'
+      + ' font-size="11" letter-spacing="3">正北</text>';
+
+    // 固定指针（手机正前方）——放在刻度环外侧，避免压住方位文字
+    out += '<g id="cmpPointer">'
+      + '<path d="M150 2 L157.5 20 L142.5 20 Z" fill="#b23a30"/>'
+      + '<circle cx="150" cy="2" r="2" fill="#e2564a"/>'
+      + '</g>';
+
+    svg.innerHTML = out;
+
+    // 生成文字标签
+    var glow = $('#cmpGlow'), lab = $('#cmpLabels');
+    cmpState.cells.forEach(function (c, idx) {
+      if (c.good) {
+        var ga = c.angle * Math.PI / 180;
+        var gx = 150 + 112 * Math.sin(ga), gy = 150 - 112 * Math.cos(ga);
+        glow.innerHTML += '<circle class="cmp-glow" data-i="' + idx + '" cx="' + gx.toFixed(1)
+          + '" cy="' + gy.toFixed(1) + '" r="24" fill="rgba(201,169,97,.10)" stroke="rgba(201,169,97,.34)" stroke-width="1"/>';
+      }
+    });
+
+    cmpState.cells.forEach(function (c, idx) {
+      lab.innerHTML += '<g class="cmp-lab" data-i="' + idx + '">'
+        + '<text class="cl-dir' + (c.good ? ' good' : '') + '" font-size="11" text-anchor="middle"'
+        + ' fill="' + (c.good ? '#ffd98a' : '#8b9294') + '" letter-spacing="1">' + c.dir + '</text>'
+        + '<text class="cl-gua" font-size="9" text-anchor="middle" fill="#6d7476" letter-spacing=".5">'
+        + c.gua + (c.n || '') + '</text>'
+        + '<text class="cl-door" font-size="10.5" text-anchor="middle"'
+        + ' fill="' + (c.good ? '#e6cf92' : '#9a9488') + '" letter-spacing=".5">' + (c.door || '') + '</text>'
+        + '</g>';
+    });
+
+    updateDial(CP.state.heading || 0);
+  }
+
+  function updateDial(h) {
+    if (!cmpState) return;
+    var svg = $('#cmpSvg');
+    if (!svg) return;
+
+    var ring = $('#cmpRing');
+    if (ring) ring.setAttribute('transform', 'rotate(' + (-h).toFixed(2) + ' 150 150)');
+
+    // 文字随方位移动但保持正立
+    cmpState.cells.forEach(function (c, idx) {
+      var a = (c.angle - h - 90) * Math.PI / 180;
+      var lab = svg.querySelector('.cmp-lab[data-i="' + idx + '"]');
+      if (!lab) return;
+      // 标签锚点收在刻度环内侧，避免压住吉门高亮圈与刻度
+      var lx = 150 + 112 * Math.cos(a), ly = 150 + 112 * Math.sin(a);
+      lab.setAttribute('transform', 'translate(' + lx.toFixed(1) + ',' + ly.toFixed(1) + ')');
+      // 三行固定为「方向 / 卦数 / 门」，整体上下移动以避开边界
+      var t1 = lab.querySelector('.cl-dir'), t2 = lab.querySelector('.cl-gua'), t3 = lab.querySelector('.cl-door');
+      // 靠近顶部时整组下移，靠近底部时整组上移，行序始终不变
+      var shift = Math.sin(a) < -0.5 ? 20 : (Math.sin(a) > 0.5 ? -20 : 0);
+      [t1, t2, t3].forEach(function (tx, i) {
+        if (!tx) return;
+        tx.setAttribute('x', 0);
+        tx.setAttribute('y', shift + i * 12);
+      });
+
+      var glow = svg.querySelector('.cmp-glow[data-i="' + idx + '"]');
+      if (glow) {
+        var gx = 150 + 112 * Math.cos(a), gy = 150 + 112 * Math.sin(a);
+        glow.setAttribute('cx', gx.toFixed(1));
+        glow.setAttribute('cy', gy.toFixed(1));
+      }
+    });
+
+    // 中心读数
+    var deg = Math.round(CP.norm(h));
+    var near = DIR8[Math.round(deg / 45) % 8];
+    var dg = $('#cmpDeg'), dn = $('#cmpDirName');
+    if (dg) dg.textContent = deg + '°';
+    if (dn) dn.textContent = near ? near.dir : '';
+
+    // 方位提示
+    renderReadout(h);
+  }
+
+  function renderReadout(h) {
+    var list = $('#cmpList');
+    var ro = $('#cmpReadout');
+    if (!list) return;
+
+    var goods = cmpState.cells.filter(function (c) { return c.good; });
+    if (!goods.length) { list.innerHTML = ''; return; }
+
+    // 最近的吉门
+    var best = null;
+    goods.forEach(function (c) {
+      var d = Math.abs(CP.deltaTo(c.angle, h));
+      if (!best || d < best.abs) best = { c: c, abs: d, delta: CP.deltaTo(c.angle, h) };
+    });
+
+    if (best) {
+      var turn = Math.round(best.delta);
+      var txt;
+      if (Math.abs(turn) <= 6) txt = '<b>已对准</b>　' + best.c.dir + '　　朝这个方向走';
+      else if (turn > 0) txt = '向右转 <b>' + Math.abs(turn) + '°</b>　→　' + best.c.dir + '（' + best.c.door + '）';
+      else txt = '向左转 <b>' + Math.abs(turn) + '°</b>　→　' + best.c.dir + '（' + best.c.door + '）';
+      if (ro) ro.innerHTML = txt;
+    }
+
+    list.innerHTML = goods.map(function (c) {
+      var d = Math.round(CP.deltaTo(c.angle, h));
+      var arrow = Math.abs(d) <= 6 ? '●' : (d > 0 ? '↻' : '↺');
+      return '<div class="cmp-item">'
+        + '<span class="ci-door">' + c.door + '</span>'
+        + '<span class="ci-dir">' + c.dir + '</span>'
+        + '<span class="ci-deg">' + c.angle + '°</span>'
+        + '<span class="ci-turn">' + arrow + ' ' + (Math.abs(d) <= 6 ? '对准' : Math.abs(d) + '°') + '</span>'
+        + '</div>';
+    }).join('');
+  }
+
+  /* ---------------- 手动拖动 ---------------- */
+  function bindDialDrag() {
+    var wrap = $('#cmpWrap');
+    if (!wrap) return;
+    var dragging = false, startAng = 0, startH = 0;
+
+    function ang(e) {
+      var r = wrap.getBoundingClientRect();
+      var x = (e.touches ? e.touches[0].clientX : e.clientX) - (r.left + r.width / 2);
+      var y = (e.touches ? e.touches[0].clientY : e.clientY) - (r.top + r.height / 2);
+      return Math.atan2(x, -y) * 180 / Math.PI; // 0=上，顺时针为正
+    }
+
+    function down(e) {
+      if (!cmpState.manual) return;
+      dragging = true;
+      startAng = ang(e);
+      startH = CP.state.heading;
+      var hint = $('#cmpHint');
+      if (hint) hint.textContent = '拖动表盘转动，使「正北」对准实际北方';
+    }
+    function move(e) {
+      if (!dragging) return;
+      e.preventDefault();
+      var d = ang(e) - startAng;
+      while (d > 180) d -= 360;
+      while (d < -180) d += 360;
+      CP.setManual(startH - d);
+    }
+    function up() { dragging = false; }
+
+    wrap.addEventListener('touchstart', down, { passive: true });
+    wrap.addEventListener('touchmove', move, { passive: false });
+    wrap.addEventListener('touchend', up);
+    wrap.addEventListener('mousedown', down);
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
   }
 
   /* ==========================================================
@@ -1700,6 +2001,11 @@
     if (e.target.closest && e.target.closest('#openGlossary')) {
       e.preventDefault();
       openGlossary();
+      return;
+    }
+    if (e.target.closest && e.target.closest('#openCmp')) {
+      e.preventDefault();
+      if (lastQmRes) openCompass(lastQmRes);
     }
   });
 
