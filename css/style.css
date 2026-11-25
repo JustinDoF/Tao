@@ -791,6 +791,100 @@ body::before {
 .mcard.ready:active { transform: scale(0.985); }
 .mcard { transition: transform 0.14s; }
 
+/* ---------------- 奇门九宫盘 ---------------- */
+.qm-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 5px;
+  border-radius: 14px;
+  border: 1px solid var(--line-2);
+}
+.qm-cell {
+  position: relative;
+  aspect-ratio: 1 / 1.06;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.032);
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  padding: 4px 3px 3px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  overflow: hidden;
+}
+.qm-cell.good {
+  background: rgba(201, 169, 97, 0.11);
+  border-color: rgba(201, 169, 97, 0.42);
+}
+.qm-cell.center { background: rgba(255, 255, 255, 0.014); }
+
+.qc-dir {
+  font-size: 8.5px;
+  color: #7d8485;
+  letter-spacing: 0.5px;
+  line-height: 1.1;
+}
+.qc-dir span {
+  display: block;
+  font-size: 8px;
+  color: #5c6365;
+}
+.qm-cell.good .qc-dir { color: var(--gold-dim); }
+
+.qc-god {
+  font-size: 9.5px;
+  color: #9a8f74;
+  letter-spacing: 0.5px;
+  line-height: 1.2;
+}
+.qc-star {
+  font-size: 11px;
+  font-family: var(--serif);
+  color: var(--txt-2);
+  letter-spacing: 0.5px;
+  line-height: 1.25;
+}
+.qm-cell.good .qc-star { color: var(--gold-hi); }
+
+.qc-door {
+  font-size: 12px;
+  font-family: var(--serif);
+  color: #d3cbb9;
+  letter-spacing: 1px;
+  line-height: 1.3;
+}
+.qm-cell.good .qc-door {
+  color: #ffd98a;
+  font-weight: 600;
+}
+
+.qc-gans {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  font-size: 9px;
+  line-height: 1.2;
+  margin-top: 1px;
+}
+.qc-gans .tg { color: #c9a961; }
+.qc-gans .dg { color: #6d7476; }
+.qc-gans .jg {
+  color: #8f7d55;
+  font-size: 8px;
+  border-left: 1px solid rgba(201, 169, 97, 0.3);
+  padding-left: 3px;
+}
+
+.rec-seal.qm {
+  color: #d8c48a;
+  border-color: rgba(201, 169, 97, 0.3);
+  background: rgba(201, 169, 97, 0.1);
+  font-size: 14px;
+}
+
 /* ---------------- 底部导航 ---------------- */
 .tabbar {
   position: fixed;

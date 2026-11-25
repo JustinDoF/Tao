@@ -10,6 +10,8 @@
   var R = window.LiuRen;
   var MH = window.Meihua;
   var MHD = window.MeihuaData;
+  var QM = window.Qimen;
+  var QMD = window.QimenData;
 
   var $ = function (s, r) { return (r || document).querySelector(s); };
   var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
@@ -44,7 +46,7 @@
       var d = JSON.parse(raw);
       if (Array.isArray(d.history)) S.history = d.history;
       if (d.settings) S.settings = Object.assign(S.settings, d.settings);
-      if (d.art === 'liuren' || d.art === 'meihua') S.art = d.art;
+      if (d.art === 'liuren' || d.art === 'meihua' || d.art === 'qimen') S.art = d.art;
     } catch (e) { /* 忽略 */ }
   }
   function saveStore() {
@@ -640,6 +642,17 @@
           + '<div class="rec-arrow">›</div>'
           + '</div>';
       }
+      if (h.art === 'qimen') {
+        var qr = QM.cast(new Date(h.qmTime || h.ts));
+        return '<div class="rec" data-id="' + h.id + '">'
+          + '<div class="rec-seal qm">局</div>'
+          + '<div class="rec-body">'
+          + '  <div class="rec-q">' + (h.q ? esc(h.q) : '<span style="color:#6f7676">未记所问</span>') + '</div>'
+          + '  <div class="rec-meta">' + fmtDate(h.ts) + ' · 奇门 · ' + qr.juText + ' · 值符' + qr.zhiFuStar + '</div>'
+          + '</div>'
+          + '<div class="rec-arrow">›</div>'
+          + '</div>';
+      }
       var r = R.castFromCounts(h.counts);
       return '<div class="rec" data-id="' + h.id + '">'
         + '<div class="rec-seal">' + r.main.name + '</div>'
@@ -667,6 +680,8 @@
         ? MH.castByNumbers(m.a, m.b)
         : MH.castByTime(m.zhi || 1, m.month || 1, m.day || 1, m.shichen || 1);
       body = mhResultHTML(rr, h.basis, h.q);
+    } else if (h.art === 'qimen') {
+      body = qmResultHTML(QM.cast(new Date(h.qmTime || h.ts)), h.basis, h.q);
     } else {
       body = resultHTML(R.castFromCounts(h.counts), h.basis, h.q);
     }
@@ -699,7 +714,8 @@
         saveStore();
         window.scrollTo(0, 0);
         renderPage();
-        toast('已切换至' + (a === 'meihua' ? '梅花易数' : '小六壬'));
+        var nm = a === 'meihua' ? '梅花易数' : (a === 'qimen' ? '奇门遁甲' : '小六壬');
+        toast('已切换至' + nm);
       };
     });
   }
@@ -1104,13 +1120,223 @@
   }
 
   /* ==========================================================
+     奇门遁甲（时家·转盘·拆补法）
+     ========================================================== */
+  function renderQimenPage() {
+    var view = $('#view');
+    view.innerHTML = ''
+      + '<div class="card gold-line">'
+      + '  <div class="now-block">'
+      + '    <div class="now-lunar" id="qmBig">—</div>'
+      + '    <div class="now-solar" id="qmSolar">—</div>'
+      + '    <div class="now-shichen" id="qmTip">—</div>'
+      + '  </div>'
+      + '  <div class="mini-row">'
+      + '    <button class="mini-btn on" id="qmNow">用此刻</button>'
+      + '    <button class="mini-btn" id="qmManual">另择时刻</button>'
+      + '  </div>'
+      + '  <div id="qmManualBox"></div>'
+      + '</div>'
+      + '<input class="q-input" id="qmQ" maxlength="40" placeholder="所问何事（可略，如：今日往何方求财）">'
+      + '<button class="cast-btn" id="qmCastBtn">起　局</button>'
+      + '<div id="qmResultBox"></div>';
+    setSubtitle('奇门遁甲 · 时家转盘');
+
+    S.qmManual = false;
+    S.qmVals = null;
+    updateQimenTime();
+
+    $('#qmNow').onclick = function () {
+      S.qmManual = false; S.qmVals = null;
+      $('#qmManualBox').innerHTML = '';
+      $$('.mini-btn').forEach(function (b) { b.classList.toggle('on', b.id === 'qmNow'); });
+      updateQimenTime();
+    };
+    $('#qmManual').onclick = function () {
+      S.qmManual = true;
+      $('#qmManualBox').innerHTML = ''
+        + '<div class="manual">'
+        + '  <div class="field"><label>起局时刻（公历，按北京时间）</label>'
+        + '    <input type="datetime-local" id="qmDt"></div>'
+        + '  <p class="hint">奇门以<b>时辰</b>起局，同一时辰内盘面相同。</p>'
+        + '</div>';
+      $$('.mini-btn').forEach(function (b) { b.classList.toggle('on', b.id === 'qmManual'); });
+      var t = S.qmVals || new Date();
+      $('#qmDt').value = t.getFullYear() + '-' + pad(t.getMonth() + 1) + '-' + pad(t.getDate())
+        + 'T' + pad(t.getHours()) + ':' + pad(t.getMinutes());
+      $('#qmDt').onchange = function () {
+        var v = this.value;
+        if (!v) return;
+        var dp = v.split('T'), a = dp[0].split('-').map(Number), b = (dp[1] || '00:00').split(':').map(Number);
+        S.qmVals = new Date(a[0], a[1] - 1, a[2], b[0], b[1]);
+        updateQimenTime();
+      };
+      updateQimenTime();
+    };
+    $('#qmCastBtn').onclick = qmDoCast;
+  }
+
+  function qmCurrentDate() {
+    return (S.qmManual && S.qmVals) ? S.qmVals : new Date();
+  }
+
+  function updateQimenTime() {
+    if (S.art !== 'qimen' || S.page !== 'cast') return;
+    var big = $('#qmBig');
+    if (!big) return;
+    var d = qmCurrentDate();
+    var r = QM.cast(d);
+    var l = L.fromDate(d, S.settings);
+    big.innerHTML = esc(r.term.name + ' ' + r.yuanName) + '<small> ' + r.juText + '</small>';
+    $('#qmSolar').textContent = d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日 '
+      + pad(d.getHours()) + ':' + pad(d.getMinutes()) + (S.qmManual ? ' · 手动择时' : ' · 公历');
+    $('#qmTip').textContent = '日' + r.dayGz + '　时' + r.hourGz + '　旬首' + r.xun;
+    var q = $('#qmQ');
+    if (q) S.question = q.value.trim();
+  }
+
+  function qmDoCast() {
+    var q = $('#qmQ');
+    S.question = q ? q.value.trim() : '';
+    var d = qmCurrentDate();
+    var r = QM.cast(d);
+    S.qmResult = r;
+    S.ts = d.getTime();
+    S.basis = r.term.name + ' ' + r.yuanName + ' ' + r.juText
+      + '　日' + r.dayGz + ' 时' + r.hourGz
+      + '　符头' + r.futou + '（' + r.yuanName + '）'
+      + '　旬首' + r.xun + '遁' + r.xunYi
+      + '　' + d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
+      + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+
+    S.history.unshift({
+      id: String(S.ts) + Math.random().toString(36).slice(2, 6),
+      art: 'qimen',
+      ts: S.ts,
+      q: S.question,
+      mode: '奇门起局',
+      basis: S.basis,
+      qmTime: d.getTime()
+    });
+    if (S.history.length > 60) S.history.length = 60;
+    saveStore();
+
+    var box = $('#qmResultBox');
+    box.innerHTML = qmResultHTML(r, S.basis, S.question);
+    var cp = $('#qmCopy');
+    if (cp) cp.onclick = function () {
+      var txt = '【奇门遁甲】' + (S.question ? S.question + '\n' : '')
+        + r.term.name + ' ' + r.yuanName + ' ' + r.juText + '\n'
+        + '日' + r.dayGz + '　时' + r.hourGz + '　旬首' + r.xun + '（遁' + r.xunYi + '）\n'
+        + '值符' + r.zhiFuStar + '　值使' + r.zhiShiDoor + '\n'
+        + '三吉门：' + r.goodDoors.map(function (g) { return g.door + '→' + g.dir; }).join('　') + '\n'
+        + '—— 掐指神通 · ' + S.basis;
+      if (navigator.clipboard && navigator.clipboard.writeText)
+        navigator.clipboard.writeText(txt).then(function () { toast('已复制局式'); }, function () { fallbackCopy(txt); });
+      else fallbackCopy(txt);
+    };
+    var ag = $('#qmAgain');
+    if (ag) ag.onclick = function () {
+      $('#qmResultBox').innerHTML = '';
+      if (q) q.value = '';
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      updateQimenTime();
+    };
+
+    setTimeout(function () {
+      var y = box.getBoundingClientRect().top + window.scrollY - 74;
+      window.scrollTo({ top: y, behavior: 'smooth' });
+    }, 60);
+  }
+
+  function qmResultHTML(r, basis, question) {
+    // 九宫格
+    var cellsHTML = '';
+    QMD.grid.forEach(function (row) {
+      row.forEach(function (n) {
+        var c = r.cells[n];
+        var isGood = QMD.goodDoors.indexOf(c.door) >= 0;
+        cellsHTML += '<div class="qm-cell' + (isGood ? ' good' : '') + (n === 5 ? ' center' : '') + '">'
+          + '<div class="qc-dir">' + c.info.dir + '<span>' + c.info.gua + n + '</span></div>'
+          + '<div class="qc-god">' + (c.god || '·') + '</div>'
+          + '<div class="qc-star">' + (c.star || '·') + '</div>'
+          + '<div class="qc-door">' + (c.door || '·') + '</div>'
+          + '<div class="qc-gans">'
+          + '<span class="tg">' + (c.tianGan || '·') + '</span>'
+          + '<span class="dg">' + (c.gan || '·') + '</span>'
+          + (c.jiGan ? '<span class="jg">' + c.jiGan + '</span>' : '')
+          + '</div>'
+          + '</div>';
+      });
+    });
+
+    var goodList = r.goodDoors.map(function (g) {
+      return '<div class="item"><div class="k">' + g.door + '</div><div class="v">'
+        + '<span style="color:var(--gold-hi);font-size:15px">' + g.dir + '</span>'
+        + '（' + g.gua + '宫·' + QMD.palaces[g.palace].wuxing + '）</div></div>';
+    }).join('');
+
+    var zfDir = r.zhiFuPalace ? QMD.palaces[r.zhiFuPalace].dir : '—';
+    var zfGua = r.zhiFuPalace ? QMD.palaces[r.zhiFuPalace].gua : '';
+
+    return ''
+      + '<div class="result">'
+      + '  <div class="card gold-line" style="margin-top:16px">'
+      + '    <div class="palace-name-row"><h2 style="font-size:24px;letter-spacing:2px">' + r.juText + '</h2>'
+      + '      <span class="luck-tag ' + (r.yang ? 'luck-ji2' : 'luck-xiong') + '" style="margin-left:auto">'
+      + (r.yang ? '阳遁' : '阴遁') + ' · ' + r.yuanName + '</span></div>'
+      + '    <p class="palace-hint">' + r.term.name + '　日' + r.dayGz + '　时' + r.hourGz + '　旬首' + r.xun + '</p>'
+      + '    <div class="chips">'
+      + '      <span class="chip">值符 <b>' + r.zhiFuStar + '</b></span>'
+      + '      <span class="chip">值使 <b>' + r.zhiShiDoor + '</b></span>'
+      + '      <span class="chip">符头 <b>' + r.futou + '</b></span>'
+      + '    </div>'
+      + '    <p class="hint" style="margin-top:12px">奇门以九宫定方位，盘成即可读方，<b>不需要罗盘起局</b>。'
+      + '若要实地方位，再用手机指南针定北向对照。</p>'
+      + '  </div>'
+
+      + '  <div class="section-title">九 宫 盘</div>'
+      + '  <div class="qm-grid">' + cellsHTML + '</div>'
+      + '  <p class="hint" style="text-align:center;margin-top:8px;line-height:1.75">'
+      + '上南下北 · 左东右西<br>每宫自上而下：八神 / 九星 / 八门 / 天盘干·地盘干</p>'
+      + '  <p class="hint" style="text-align:center;margin-top:4px;color:#5f6667">'
+      + '中五宫寄坤二宫，坤宫末位小字即寄宫之干</p>'
+
+      + '  <div class="section-title">吉 门 方 位</div>'
+      + '  <div class="items">' + goodList + '</div>'
+
+      + '  <div class="section-title">取 用</div>'
+      + '  <div class="card">'
+      + '    <p class="meaning">值符落<b style="color:var(--gold-hi)">' + zfDir + '（' + zfGua + '宫）</b>，'
+      + '为当时气机所聚；临此方办事，得势得助。</p>'
+      + '    <p class="meaning" style="margin-top:10px">三吉门者，开、休、生也。'
+      + esc(r.goodDoors.map(function (g) { return g.door + '在' + g.dir; }).join('，'))
+      + '。求财谋事宜向生门，出行谒贵宜向开门，休养安居宜向休门。</p>'
+      + '    <p class="basis" style="margin-top:12px">本盘采时家奇门·转盘·拆补法。'
+      + '另有置闰法、飞盘法、阴盘奇门等，起局与排布皆有出入，不可混用。</p>'
+      + '  </div>'
+
+      + '  <div class="basis" style="margin-top:14px">'
+      + '    <b>起局依据</b>　' + esc(basis) + '<br>'
+      + '    <b>所问</b>　' + (question ? esc(question) : '未填') + '<br>'
+      + '    <b>记时</b>　' + fmtDate(S.ts)
+      + '  </div>'
+
+      + '  <div class="row-actions">'
+      + '    <button id="qmCopy">复制局式</button>'
+      + '    <button id="qmAgain">再起一局</button>'
+      + '  </div>'
+      + '</div>';
+  }
+
+  /* ==========================================================
      术法页
      ========================================================== */
   var METHODS = [
     { id: 'liuren', name: '小六壬', desc: '掐指神通。六宫轮转，三步断事，最便最速。', ready: true },
     { id: 'meihua', name: '梅花易数', desc: '以数起卦，体用生克，互卦变卦观终始。', ready: true },
+    { id: 'qimen', name: '奇门遁甲', desc: '时家转盘，九宫八门，择时择方。', ready: true },
     { id: 'liuyao', name: '六爻纳甲', desc: '铜钱摇卦，装卦纳甲，六亲六神断吉凶。' },
-    { id: 'qimen', name: '奇门遁甲', desc: '九宫八门，时家起局，择时择方。' },
     { id: 'taiyi', name: '太乙神数', desc: '三式之首，推演国运岁计。' },
     { id: 'zhuge', name: '诸葛神数', desc: '三字数定签，占断人事。' }
   ];
@@ -1153,6 +1379,21 @@
       + '  </div>'
       + '</div>'
 
+      + '<div class="section-title">奇 门 遁 甲 法 要</div>'
+      + '<div class="card">'
+      + '  <p class="meaning" style="font-size:12.5px">本作采<b style="color:var(--gold-hi)">时家奇门 · 转盘 · 拆补法</b>。'
+      + '以时辰起局，九宫定方位——盘成即可读方，<b>不需罗盘起局</b>。</p>'
+      + '  <div class="items" style="margin-top:12px">'
+      + '    <div class="item"><div class="k">定局</div><div class="v">按太阳黄经定节气，再以当日符头（甲、己日）支定上中下元，查表得阳遁或阴遁几局。冬至后阳遁顺行，夏至后阴遁逆行。</div></div>'
+      + '    <div class="item"><div class="k">地盘</div><div class="v">按局数布三奇六仪（戊己庚辛壬癸丁丙乙），阳遁顺九宫、阴遁逆九宫。</div></div>'
+      + '    <div class="item"><div class="k">天盘</div><div class="v">取旬首所遁之仪为值符，值符加时干落宫，其余八星依次随转。天禽寄坤二，随天芮同宫。</div></div>'
+      + '    <div class="item"><div class="k">八门</div><div class="v">旬首原宫之门为值使，自值使起按阳顺阴逆数至时支，落宫后八门依次排布。</div></div>'
+      + '    <div class="item"><div class="k">八神</div><div class="v">值符起于值符落宫，阳遁顺布、阴遁逆布：值符、腾蛇、太阴、六合、白虎、玄武、九地、九天。</div></div>'
+      + '    <div class="item"><div class="k">取方</div><div class="v">三吉门为要：开门宜出行谒贵、生门宜求财谋事、休门宜安居休养。值符所落之方为气机所聚。</div></div>'
+      + '  </div>'
+      + '  <p class="hint" style="margin-top:12px;color:#6f7576">\u7248\u672c\u8bf4\u660e\uff1a\u53e6\u6709\u7f6e\u95f0\u6cd5\u3001\u98de\u76d8\u6cd5\u3001\u9634\u76d8\u5947\u95e8\u7b49\uff0c\u8d77\u5c40\u4e0e\u6392\u5e03\u5747\u6709\u51fa\u5165\uff0c\u4e0d\u53ef\u6df7\u7528\u3002</p>'
+      + '</div>'
+
       + '<div class="section-title">装 到 iPhone</div>'
       + '<div class="card">'
       + '  <div class="steps-guide">'
@@ -1163,7 +1404,7 @@
       + '  </div>'
       + '</div>'
 
-      + '<p class="foot-note">小六壬属道家民间掌诀，梅花易数本于邵雍《梅花易数》，历代口诀流派互有出入，本作采通行本。<br>所出断语为传统文化推演，非科学预测，仅供参详与自省，勿据以决大事、代医疗。</p>';
+      + '<p class="foot-note">小六壬属道家民间掌诀，梅花易数本于邵雍《梅花易数》，奇门遁甲采时家转盘拆补法。<br>所出断语为传统文化推演，非科学预测，仅供参详与自省，勿据以决大事、代医疗。</p>';
   }
 
   /* ==========================================================
@@ -1246,6 +1487,7 @@
     var view = $('#view');
     if (S.page === 'cast') {
       if (S.art === 'meihua') { renderMeihuaPage(); gotoBottomFix(); return; }
+      if (S.art === 'qimen') { renderQimenPage(); gotoBottomFix(); return; }
       view.innerHTML = castPageHTML();
       setSubtitle();
       $$('#segMethod button').forEach(function (b) {
