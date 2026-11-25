@@ -2,6 +2,20 @@
 
 道家掌诀演算器。iPhone 优先的网页应用（PWA），添加到主屏后全屏运行、断网可用。
 
+## 在线版
+
+GitHub Pages 托管，源码仓库：<https://github.com/JustinDoF/Tao>
+
+启用 Pages 后访问地址为：
+
+```
+https://justindof.github.io/Tao/
+```
+
+iPhone 上用 **Safari** 打开该地址 → 分享 → 「添加到主屏幕」。
+
+> 修改代码后推送到 `main` 分支，Pages 约 1 分钟自动重新部署。
+
 ## 一分钟上手
 
 1. 用 **Safari** 打开本页（微信内打开无法安装）。
@@ -86,6 +100,27 @@ daoshu/
 ```bash
 node daoshu/tools/test-engine.js
 ```
+
+## 在线更新文件（含图片）
+
+仓库里的文件可以直接在网页上改，不需要装 Git 客户端。
+
+**改文字、改代码（纯文本）**
+
+1. 打开 <https://github.com/JustinDoF/Tao>
+2. 点进要改的文件（如 `js/data.js`），点右上角 **铅笔图标**
+3. 改完 → 页面底部 **Commit changes** → 直接提交到 `main`
+
+**换图标（PNG 等图片）**
+
+1. 打开 <https://github.com/JustinDoF/Tao/tree/main/icons>
+2. 点右上角 **Add file → Upload files**
+3. 把 PNG 拖进虚线框，**文件名必须与原来一致**（如 `icon-180.png`），GitHub 会自动覆盖同名文件
+4. 页面底部 **Commit changes**
+
+> 注意：`icon-180.png` 是 iPhone 主屏图标，改完要在手机上**删掉主屏图标重新添加**才会生效（iOS 缓存图标很顽固）。尺寸必须是 180×180。
+
+**换整套图标**：本地改 `tools/gen-icons.js` 里的配色或比例，跑 `node daoshu/tools/gen-icons.js` 重新生成，再按上面步骤覆盖上传。
 
 ## 说明
 
