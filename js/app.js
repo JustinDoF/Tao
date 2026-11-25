@@ -12,6 +12,8 @@
   var MHD = window.MeihuaData;
   var QM = window.Qimen;
   var QMD = window.QimenData;
+  var BAI = window.MeihuaBai || {};
+  var GL = window.Glossary;
 
   var $ = function (s, r) { return (r || document).querySelector(s); };
   var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
@@ -53,6 +55,60 @@
     try {
       localStorage.setItem(STORE, JSON.stringify({ history: S.history, settings: S.settings, art: S.art }));
     } catch (e) { /* 忽略 */ }
+  }
+
+  /* ---------------- 术语查询 ---------------- */
+  function termChip(name) {
+    if (!GL.get(name)) return '<span class="term-plain">' + esc(name) + '</span>';
+    return '<button class="term" data-term="' + esc(name) + '">' + esc(name) + '<i>?</i></button>';
+  }
+
+  /** 从一段文本里找出用到的术语，列成可点的区域 */
+  function termsSectionHTML(text) {
+    var found = GL.findTerms(text);
+    if (!found.length) return '';
+    return '<div class="section-title">术 语 释 义</div>'
+      + '<div class="card"><p class="hint" style="margin-bottom:10px">点下方术语即看白话解释</p>'
+      + '<div class="term-wrap">'
+      + found.map(function (t) { return termChip(t); }).join('')
+      + '<button class="term all" id="openGlossary">全部术语 ›</button>'
+      + '</div></div>';
+  }
+
+  function openTerm(name) {
+    var t = GL.get(name);
+    if (!t) return;
+    var cat = GL.cats.filter(function (c) { return c.key === t.cat; })[0];
+    openSheet('术语', cat ? cat.name : '',
+      '<div class="term-detail">'
+      + '<div class="td-name">' + esc(name) + '</div>'
+      + '<p class="td-plain">' + esc(t.plain) + '</p>'
+      + '<p class="td-detail">' + esc(t.detail) + '</p>'
+      + '</div>'
+      + '<button class="mini-btn" style="margin-top:18px" id="tdClose">知道了</button>');
+    var b = $('#tdClose');
+    if (b) b.onclick = closeSheet;
+  }
+
+  function openGlossary() {
+    var html = '<h3>术 语 词 典</h3><p class="sheet-sub">共 ' + Object.keys(GL.terms).length + ' 条</p>';
+    GL.cats.forEach(function (c) {
+      var list = Object.keys(GL.terms).filter(function (k) { return GL.terms[k].cat === c.key; });
+      if (!list.length) return;
+      html += '<div class="gl-cat">' + c.name + '</div>';
+      list.forEach(function (k) {
+        var t = GL.terms[k];
+        html += '<div class="gl-item" data-term="' + esc(k) + '">'
+          + '<div class="gl-name">' + esc(k) + '</div>'
+          + '<div class="gl-plain">' + esc(t.plain) + '</div>'
+          + '</div>';
+      });
+    });
+    openSheet(null, null, html);
+    var sheet = $('#sheet');
+    sheet.querySelectorAll('.gl-item').forEach(function (el) {
+      el.onclick = function () { openTerm(el.getAttribute('data-term')); };
+    });
   }
 
   /* ---------------- 工具 ---------------- */
@@ -567,6 +623,10 @@
       + '    <p class="basis" style="margin-top:12px">' + esc(res.yingqi) + '</p>'
       + '  </div>'
 
+      + lrBaiHTML(res)
+
+      + termsSectionHTML('天时 地利 人和 应期 ' + m.god + ' 五行 相生 相克 ' + m.name)
+
       + '  <div class="basis">'
       + '    <b>起课依据</b>　' + esc(basis) + '<br>'
       + '    <b>落宫次序</b>　' + res.stops.map(function (s) { return s.palace.name + '(' + s.n + ')'; }).join(' → ')
@@ -698,6 +758,37 @@
     };
   }
 
+  /** 小六壬白话解 */
+  function lrBaiHTML(res) {
+    var m = res.main;
+    var lines = [];
+    var lvl = m.luck.level;
+
+    lines.push('<b>一句话</b>：这一课落在「' + m.name + '」，'
+      + (lvl >= 4 ? '是六个宫位里最好的两个之一，事情大体顺遂。'
+        : lvl >= 3 ? '属吉，事情能成，但要看火候。'
+        : lvl === -2 ? '偏滞，事情会拖，急不得。'
+        : lvl <= -3 ? '属凶，眼下不适合推进，宜守。'
+        : '平中带变，成败在人为。'));
+
+    lines.push('<b>为什么</b>：三宫从起因走到结果，'
+      + '起于「' + res.stops[0].palace.name + '」，'
+      + (res.stops.length === 3 ? '经过「' + res.stops[1].palace.name + '」，' : '')
+      + '落在「' + m.name + '」。'
+      + (lvl >= 3 ? '末宫为吉，所以断为好。'
+        : lvl < 0 ? '末宫不利，所以断为阻。' : '末宫平常，全看自己怎么做。'));
+
+    var item = m.items['谋事'] || '';
+    lines.push('<b>该怎么做</b>：' + esc(item.replace(/。$/, '')) + '。'
+      + (lvl >= 3 ? '可以着手去办，但别求一步到位。' : '先别急着下重注，留条退路。'));
+
+    return '<div class="card bai-card" style="margin-top:14px">'
+      + '<div class="bai-head"><span class="bai-tag">白 话 解</span>'
+      + '<span class="bai-sub">这一课怎么看</span></div>'
+      + lines.map(function (t) { return '<p class="bai-text" style="margin:0 0 10px">' + t + '</p>'; }).join('')
+      + '</div>';
+  }
+
   /* ==========================================================
      梅花易数
      ========================================================== */
@@ -714,8 +805,6 @@
         saveStore();
         window.scrollTo(0, 0);
         renderPage();
-        var nm = a === 'meihua' ? '梅花易数' : (a === 'qimen' ? '奇门遁甲' : '小六壬');
-        toast('已切换至' + nm);
       };
     });
   }
@@ -1005,6 +1094,18 @@
       + ' aria-label="卦象">' + out + '</svg>';
   }
 
+  /* ---------------- 白话解 ---------------- */
+  function baiCardHTML(r) {
+    var b = BAI[r.ben.n];
+    if (!b) return '';
+    return '<div class="card bai-card" style="margin-top:14px">'
+      + '<div class="bai-head"><span class="bai-tag">白 话 解</span>'
+      + '<span class="bai-sub">' + esc(r.ben.name) + ' · 第 ' + r.ben.n + ' 卦</span></div>'
+      + '<p class="bai-text">' + esc(b.bai) + '</p>'
+      + '<div class="bai-use"><span>怎 么 用</span>' + esc(b.yong) + '</div>'
+      + '</div>';
+  }
+
   function mhResultHTML(r, basis, question) {
     var rel = r.verdict.rel;
     var tone = r.verdict.tone;
@@ -1063,6 +1164,8 @@
       + '    <div class="verse-seal">梅花<br>易数</div>'
       + '  </div>'
 
+      + baiCardHTML(r)
+
       + '  <div class="section-title">本 互 变 三 卦</div>'
       + trios
 
@@ -1073,6 +1176,9 @@
 
       + '  <div class="section-title">卦 象 详 解</div>'
       + items
+
+      + termsSectionHTML(r.ben.duan + ' ' + r.verdict.lines.join(' ') + ' ' + r.verdict.rel.text
+        + ' 体卦 用卦 互卦 变卦 动爻 先天数 五行 相生 相克')
 
       + '  <div class="basis" style="margin-top:14px">'
       + '    <b>起卦依据</b>　' + esc(basis) + '<br>'
@@ -1087,7 +1193,6 @@
 
       + '</div>';
   }
-
   function bindMhActions(r) {
     var c = $('#mhCopy');
     if (c) c.onclick = function () {
@@ -1295,6 +1400,8 @@
       + '若要实地方位，再用手机指南针定北向对照。</p>'
       + '  </div>'
 
+      + qmBaiHTML(r, zfDir, zfGua)
+
       + '  <div class="section-title">九 宫 盘</div>'
       + '  <div class="qm-grid">' + cellsHTML + '</div>'
       + '  <p class="hint" style="text-align:center;margin-top:8px;line-height:1.75">'
@@ -1316,6 +1423,10 @@
       + '另有置闰法、飞盘法、阴盘奇门等，起局与排布皆有出入，不可混用。</p>'
       + '  </div>'
 
+      + termsSectionHTML('值符 值使 旬首 三奇 六仪 阳遁 阴遁 局数 寄宫 天盘 地盘 '
+        + r.goodDoors.map(function (g) { return g.door; }).join(' ')
+        + ' ' + Object.keys(r.cells).map(function (k) { return r.cells[k].star + ' ' + r.cells[k].god; }).join(' '))
+
       + '  <div class="basis" style="margin-top:14px">'
       + '    <b>起局依据</b>　' + esc(basis) + '<br>'
       + '    <b>所问</b>　' + (question ? esc(question) : '未填') + '<br>'
@@ -1326,6 +1437,51 @@
       + '    <button id="qmCopy">复制局式</button>'
       + '    <button id="qmAgain">再起一局</button>'
       + '  </div>'
+      + '</div>';
+  }
+
+  /** 奇门白话解：把盘说成人话 */
+  function qmBaiHTML(r, zfDir, zfGua) {    var goodNames = r.goodDoors.map(function (g) { return g.door; });
+    // 三吉门各主何事
+    var uses = {
+      '生门': '求财、谈生意、找机会',
+      '开门': '见人、求职、开业、出门办事',
+      '休门': '休息、养病、托人说和'
+    };
+    var lines = [];
+
+    lines.push('<b>一句话</b>：这是一个「' + (r.yang ? '阳遁' : '阴遁') + '」的盘，'
+      + '当下气机集中在<b style="color:var(--gold-hi)">' + zfDir + '</b>方向。');
+
+    var usable = goodNames.filter(function (n) { return uses[n]; });
+    if (usable.length) {
+      lines.push('<b>能往哪走</b>：' + usable.map(function (n) {
+        var g = r.goodDoors.filter(function (x) { return x.door === n; })[0];
+        return '往<b style="color:var(--gold-hi)">' + g.dir + '</b>办' + uses[n];
+      }).join('；') + '，比往别的方向顺。');
+    }
+
+    // 忌方：死门、惊门所在
+    var bad = [];
+    r.goodDoors.forEach(function () {});
+    Object.keys(r.cells).forEach(function (k) {
+      var c = r.cells[k];
+      if (c.door === '死门' || c.door === '惊门') {
+        bad.push(c.door + '在' + c.info.dir);
+      }
+    });
+    if (bad.length) {
+      lines.push('<b>哪里别去</b>：' + bad.join('，') + '。这些方向主停滞与惊扰，'
+        + '谈事、签约、出行尽量绕开。');
+    }
+
+    lines.push('<b>要注意</b>：奇门看的是「方位」与「时机」，'
+      + '不是吉凶判决书。同一时辰内盘面不变，换个时辰再起，答案就不同了。');
+
+    return '<div class="card bai-card" style="margin-top:14px">'
+      + '<div class="bai-head"><span class="bai-tag">白 话 解</span>'
+      + '<span class="bai-sub">九宫盘怎么看</span></div>'
+      + lines.map(function (t) { return '<p class="bai-text" style="margin:0 0 10px">' + t + '</p>'; }).join('')
       + '</div>';
   }
 
@@ -1532,6 +1688,20 @@
   });
 
   $('#btnSettings').onclick = openSettings;
+
+  /* ---------------- 术语点击（委托，覆盖结果与弹层） ---------------- */
+  document.addEventListener('click', function (e) {
+    var el = e.target.closest ? e.target.closest('.term[data-term], .gl-item[data-term]') : null;
+    if (el) {
+      e.preventDefault();
+      openTerm(el.getAttribute('data-term'));
+      return;
+    }
+    if (e.target.closest && e.target.closest('#openGlossary')) {
+      e.preventDefault();
+      openGlossary();
+    }
+  });
 
   /* ---------------- 启动 ---------------- */
   loadStore();

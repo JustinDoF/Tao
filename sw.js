@@ -1,5 +1,5 @@
 /* 掐指神通 · 离线缓存 */
-var CACHE = 'daoshu-v5';
+var CACHE = 'daoshu-v6';
 var ASSETS = [
   './',
   './index.html',
@@ -8,9 +8,11 @@ var ASSETS = [
   './js/data.js',
   './js/engine.js',
   './js/meihua-data.js',
+  './js/meihua-bai.js',
   './js/meihua.js',
   './js/qimen-data.js',
   './js/qimen.js',
+  './js/glossary.js',
   './js/app.js',
   './manifest.webmanifest',
   './icons/icon.svg',
