@@ -15,6 +15,8 @@
   var BAI = window.MeihuaBai || {};
   var GL = window.Glossary;
   var CP = window.Compass;
+  var LY = window.LiuYao;
+  var LYD = window.LiuYaoData;
 
   var $ = function (s, r) { return (r || document).querySelector(s); };
   var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
@@ -35,6 +37,9 @@
     manualVals: null,
     result: null,
     mhResult: null,
+    lyStates: [],
+    lyYong: null,
+    lyResult: null,
     basis: '',
     ts: 0,
     history: [],
@@ -49,7 +54,7 @@
       var d = JSON.parse(raw);
       if (Array.isArray(d.history)) S.history = d.history;
       if (d.settings) S.settings = Object.assign(S.settings, d.settings);
-      if (d.art === 'liuren' || d.art === 'meihua' || d.art === 'qimen') S.art = d.art;
+      if (d.art === 'liuren' || d.art === 'meihua' || d.art === 'qimen' || d.art === 'liuyao') S.art = d.art;
     } catch (e) { /* 忽略 */ }
   }
   function saveStore() {
@@ -714,6 +719,20 @@
           + '<div class="rec-arrow">›</div>'
           + '</div>';
       }
+      if (h.art === 'liuyao') {
+        var lr = LY.cast((h.ly || []).map(function (k) {
+          return LYD.yaoStates.filter(function (s) { return s.key === k; })[0] || LYD.yaoStates[2];
+        }), { date: new Date(h.ts), yongshen: h.lyYong });
+        return '<div class="rec" data-id="' + h.id + '">'
+          + '<div class="rec-seal ly">' + lr.ben.short + '</div>'
+          + '<div class="rec-body">'
+          + '  <div class="rec-q">' + (h.q ? esc(h.q) : '<span style="color:#6f7676">未记所问</span>') + '</div>'
+          + '  <div class="rec-meta">' + fmtDate(h.ts) + ' · 六爻 · ' + lr.palaceText
+          + (lr.moving.length ? ' · 动' + lr.moving.length : ' · 静') + '</div>'
+          + '</div>'
+          + '<div class="rec-arrow">›</div>'
+          + '</div>';
+      }
       var r = R.castFromCounts(h.counts);
       return '<div class="rec" data-id="' + h.id + '">'
         + '<div class="rec-seal">' + r.main.name + '</div>'
@@ -745,6 +764,12 @@
       var qres = QM.cast(new Date(h.qmTime || h.ts));
       lastQmRes = qres;
       body = qmResultHTML(qres, h.basis, h.q);
+    } else if (h.art === 'liuyao') {
+      var lres = LY.cast((h.ly || []).map(function (k) {
+        return LYD.yaoStates.filter(function (s) { return s.key === k; })[0] || LYD.yaoStates[2];
+      }), { date: new Date(h.ts), yongshen: h.lyYong });
+      S.ts = h.ts;
+      body = lyResultHTML(lres);
     } else {
       body = resultHTML(R.castFromCounts(h.counts), h.basis, h.q);
     }
@@ -1787,13 +1812,326 @@
   }
 
   /* ==========================================================
+     六爻纳甲
+     ========================================================== */
+  function renderLiuyaoPage() {
+    var view = $('#view');
+    var states = S.lyStates || [];
+    var tossed = states.filter(Boolean).length;
+
+    view.innerHTML = ''
+      + '<div class="card gold-line ly-toss-card">'
+      + '  <p class="ly-tip" id="lyTip">'
+      + (tossed === 6 ? '六爻已备，可成卦' : '心中默念所问之事，由初爻起，自下而上逐爻摇之')
+      + '</p>'
+      + '  <div class="ly-slots" id="lySlots">' + lySlotsHTML(states) + '</div>'
+      + '  <button class="cast-btn" id="lyTossBtn">'
+      + (tossed === 6 ? '重 新 摇 卦' : (tossed === 0 ? '摇　初　爻' : '摇　第 ' + LY_CN[tossed] + '　爻'))
+      + '</button>'
+      + '  <div class="row-actions" style="margin-top:10px">'
+      + '    <button id="lyAll">一次摇完</button>'
+      + '    <button id="lyReset">清空重来</button>'
+      + '  </div>'
+      + '</div>'
+      + '<div id="lyResultBox"></div>';
+
+    setSubtitle('六爻纳甲 · 铜钱摇卦');
+
+    $('#lyTossBtn').onclick = function () {
+      if ((S.lyStates || []).filter(Boolean).length === 6) { S.lyStates = []; }
+      lyTossOne();
+    };
+    $('#lyAll').onclick = function () {
+      S.lyStates = [];
+      for (var i = 0; i < 6; i++) S.lyStates.push(LY.toss());
+      S.ts = Date.now();
+      refreshLySlots();
+      setTimeout(function () { lyBuild(); }, 260);
+    };
+    $('#lyReset').onclick = function () {
+      S.lyStates = [];
+      $('#lyResultBox').innerHTML = '';
+      renderLiuyaoPage();
+    };
+  }
+
+  var LY_CN = ['初', '二', '三', '四', '五', '上'];
+
+  function lySlotsHTML(states) {
+    var out = '';
+    for (var p = 6; p >= 1; p--) {   // 上爻在上，初爻在下
+      var s = states[p - 1];
+      out += '<div class="ly-slot' + (s ? ' filled' : '') + (s && s.moving ? ' moving' : '') + '">'
+        + '<div class="ls-pos">' + LY_CN[p - 1] + '爻</div>'
+        + '<div class="ls-bar">' + (s ? lyBarHTML(s.yin, s.moving) : '<span class="ls-empty">— —</span>') + '</div>'
+        + '<div class="ls-state">' + (s ? s.name + '<i>' + s.mark + '</i>' : '') + '</div>'
+        + '</div>';
+    }
+    return out;
+  }
+
+  function lyBarHTML(yin, moving) {
+    var cls = 'yb' + (moving ? ' yb-move' : '');
+    if (yin) {
+      return '<span class="' + cls + ' yin"><i></i><i></i></span>';
+    }
+    return '<span class="' + cls + ' yang"><i></i></span>';
+  }
+
+  function refreshLySlots() {
+    var el = $('#lySlots');
+    if (el) el.innerHTML = lySlotsHTML(S.lyStates || []);
+    var n = (S.lyStates || []).filter(Boolean).length;
+    var tip = $('#lyTip');
+    if (tip) tip.textContent = n === 6 ? '六爻已备，可成卦' : '心中默念所问之事，由初爻起，自下而上逐爻摇之';
+    var btn = $('#lyTossBtn');
+    if (btn) btn.textContent = n === 6 ? '重 新 摇 卦' : (n === 0 ? '摇　初　爻' : '摇　第 ' + LY_CN[n] + '　爻');
+  }
+
+  function lyTossOne() {
+    if (!S.lyStates) S.lyStates = [];
+    var n = S.lyStates.filter(Boolean).length;
+    if (n >= 6) return;
+    var r = LY.toss();
+    S.lyStates[n] = r;
+    tick(560 + r.coins * 90);
+    buzz(12);
+    refreshLySlots();
+    // 摇满六爻即成卦
+    if (S.lyStates.filter(Boolean).length === 6) {
+      S.ts = Date.now();
+      setTimeout(function () { lyBuild(); }, 320);
+    }
+  }
+
+  function lyBuild() {
+    if (!S.lyStates || S.lyStates.filter(Boolean).length < 6) return;
+    var date = new Date(S.ts || Date.now());
+    S.lyYong = S.lyYong || null;
+    var r = LY.cast(S.lyStates, { date: date, yongshen: S.lyYong });
+    S.lyResult = r;
+
+    S.history.unshift({
+      id: String(S.ts) + Math.random().toString(36).slice(2, 6),
+      art: 'liuyao',
+      ts: S.ts,
+      q: S.question,
+      mode: '六爻摇卦',
+      basis: r.ben.name + '　' + r.palaceText + '　日' + r.dayGanZhi + '　月建' + r.monthZhi,
+      ly: S.lyStates.map(function (s) { return s.key; }),
+      lyYong: S.lyYong
+    });
+    if (S.history.length > 60) S.history.length = 60;
+    saveStore();
+
+    var box = $('#lyResultBox');
+    box.innerHTML = lyResultHTML(r);
+    bindLyActions(r);
+    setTimeout(function () {
+      var y = box.getBoundingClientRect().top + window.scrollY - 74;
+      window.scrollTo({ top: y, behavior: 'smooth' });
+    }, 60);
+  }
+
+  /* ---------------- 卦盘渲染 ---------------- */
+  function lyResultHTML(r) {
+    var rows = '';
+    for (var p = 6; p >= 1; p--) {
+      var y = r.yao[p - 1];
+      var isYao = r.yongshen && y.liuqin === r.yongshen;
+      var fu = y.fushen;
+      rows += '<div class="ly-row' + (y.moving ? ' is-move' : '') + (isYao ? ' is-yong' : '') + '">'
+        + '<div class="lr-shen">' + y.liushen + '</div>'
+        + '<div class="lr-main">'
+        + (fu ? '<div class="lr-fu">伏 ' + fu.liuqin + ' ' + fu.ganZhi + '</div>' : '')
+        + '<div class="lr-line">'
+        + '<span class="lr-qin">' + y.liuqin + '</span>'
+        + '<span class="lr-gz">' + y.ganZhi + '<i>' + y.wuxing + '</i></span>'
+        + lyBarHTML(y.yin, y.moving)
+        + '<span class="lr-sy">' + (y.shi ? '世' : (y.ying ? '应' : '')) + '</span>'
+        + '</div>'
+        + '</div>'
+        + '<div class="lr-bian">'
+        + (y.moving
+          ? '<div class="lrb-qin">' + y.bianLiqin + '</div><div class="lrb-gz">' + y.bianGanZhi + '</div>'
+          : '')
+        + '</div>'
+        + '</div>';
+    }
+
+    var head = ''
+      + '<div class="ly-head">'
+      + '  <div class="lh-main"><span>本　卦</span><b>' + r.ben.name + '</b></div>'
+      + '  <div class="lh-bian"><span>变　卦</span><b>' + (r.bian ? r.bian.hex.name : '无') + '</b></div>'
+      + '</div>'
+      + '<div class="ly-meta">'
+      + '  <span class="chip">' + r.palaceText + '</span>'
+      + '  <span class="chip">' + (r.bian ? '动爻 ' + r.moving.length : '六爻安静') + '</span>'
+      + '  <span class="chip">日 <b>' + r.dayGanZhi + '</b></span>'
+      + '  <span class="chip">月建 <b>' + r.monthZhi + '</b></span>'
+      + '  <span class="chip">旬空 <b>' + r.kong.join('') + '</b></span>'
+      + '</div>';
+
+    // 伏神汇总
+    var fuBox = '';
+    if (r.fushen.length) {
+      fuBox = '<div class="ly-fu-list">'
+        + r.fushen.map(function (f) {
+          return '<span>' + f.liuqin + ' ' + f.ganZhi + ' 伏第' + f.pos + '爻</span>';
+        }).join('') + '</div>';
+    }
+
+    // 用神选择
+    var yongChips = LYD.yongshen.map(function (y) {
+      var on = r.yongshen === y.key ? ' on' : '';
+      var inGua = r.yao.some(function (yy) { return yy.liuqin === y.key; });
+      var hasFu = r.fushen.some(function (f) { return f.liuqin === y.key; });
+      return '<button class="ly-yong' + on + '" data-yong="' + y.key + '">' + y.key
+        + '<i>' + (inGua ? '上卦' : (hasFu ? '伏藏' : '不上卦')) + '</i></button>';
+    }).join('');
+
+    var yongDesc = r.yongshen ? (LYD.yongshen.filter(function (x) { return x.key === r.yongshen; })[0] || {}).desc : '';
+
+    var analysis = '';
+    if (r.analysis) {
+      analysis = '<div class="section-title">用 神 分 析</div>'
+        + '<div class="card">'
+        + '  <div class="ly-tone"><span class="luck-tag ' + r.analysis.tone.cls + '">'
+        + r.analysis.tone.label + '</span>'
+        + '<span class="ly-yongname">用神 · ' + r.yongshen + '</span></div>'
+        + r.analysis.lines.map(function (t) {
+          return '<p class="meaning" style="margin:9px 0 0">' + esc(t) + '</p>';
+        }).join('')
+        + '</div>';
+    }
+
+    return ''
+      + '<div class="result">'
+      + '  <div class="card gold-line" style="margin-top:16px">'
+      + head
+      + '    <div class="ly-pan">' + rows + '</div>'
+      + fuBox
+      + '    <p class="hint" style="margin-top:10px;line-height:1.75">'
+      + '自下而上为初至六爻　｜　左列六神，中列本卦六亲干支，右列变卦'
+      + (r.moving.length ? '，加粗者为动爻' : '') + '</p>'
+      + '  </div>'
+
+      + '  <div class="section-title">取 用 神</div>'
+      + '  <div class="card">'
+      + '    <p class="hint" style="margin-bottom:10px">六爻断卦先定用神。按所问之事，点选相应六亲</p>'
+      + '    <div class="ly-yong-wrap">' + yongChips + '</div>'
+      + (yongDesc ? '<p class="hint" style="margin-top:10px">用神含义：' + esc(yongDesc) + '</p>' : '')
+      + '  </div>'
+
+      + analysis
+
+      + lyBaiHTML(r)
+
+      + termsSectionHTML('六爻 纳甲 六亲 六神 世应 用神 伏神 旬空 月建 日辰 旺相休囚死 动爻 '
+        + '父母 兄弟 子孙 妻财 官鬼 青龙 朱雀 勾陈 腾蛇 白虎 玄武 '
+        + (r.yongshen || ''))
+
+      + '  <div class="basis" style="margin-top:14px">'
+      + '    <b>卦体</b>　' + r.ben.name + '（' + r.palaceText + '）'
+      + (r.bian ? '　变 ' + r.bian.hex.name : '') + '<br>'
+      + '    <b>干支</b>　日' + r.dayGanZhi + '　月建' + r.monthZhi + '　旬空' + r.kong.join('') + '<br>'
+      + '    <b>动爻</b>　' + (r.moving.length
+        ? r.moving.map(function (y) { return LY_CN[y.pos - 1] + '爻'; }).join('、')
+        : '无（静卦）') + '<br>'
+      + '    <b>记时</b>　' + fmtDate(S.ts)
+      + '  </div>'
+
+      + '  <div class="row-actions">'
+      + '    <button id="lyCopy">复制卦式</button>'
+      + '    <button id="lyAgain">再摇一卦</button>'
+      + '  </div>'
+      + '</div>';
+  }
+
+  /** 六爻白话解 */
+  function lyBaiHTML(r) {
+    var lines = [];
+    var mv = r.moving.length;
+
+    lines.push('<b>一句话</b>：得「' + r.ben.name + '」，属' + r.palaceText + '。'
+      + (mv === 0 ? '六爻安静，事态平稳，短期内不会有大的变动。'
+        : mv === 1 ? '一爻独动，事情的变数集中在一处，方向比较明确。'
+        : mv <= 3 ? mv + ' 爻发动，事情正在变动之中，头绪较多。'
+        : mv + ' 爻乱动，事情纷乱，牵涉面广，宜先理清主次。'));
+
+    if (r.bian) {
+      lines.push('<b>会变成什么</b>：由「' + r.ben.short + '」变为「' + r.bian.hex.short
+        + '」。本卦是眼下，变卦是后势——'
+        + (r.bian.hex.fortune === '吉' ? '后势转好，值得等下去。'
+          : r.bian.hex.fortune === '凶' ? '后势转差，宜早作打算，别拖到坏的时候。'
+          : '后势平顺，成败主要看人为。'));
+    }
+
+    if (!r.yongshen) {
+      lines.push('<b>下一步</b>：先在下面「取用神」里点选你所问之事（问财点妻财、问工作点官鬼、问文书点父母……），'
+        + '我再据此断吉凶。六爻不看用神是断不了的。');
+    } else if (r.analysis) {
+      var tn = r.analysis.tone.label;
+      lines.push('<b>结论</b>：所问之事取「' + r.yongshen + '」为用神，'
+        + (tn === '大吉' ? '用神旺相得力，事情可成，可以着手去办。'
+          : tn === '吉' ? '用神有气，事可为，但要借力，不宜独自硬扛。'
+          : tn === '平' ? '用神平平，成败在人，守正待时为宜。'
+          : tn === '小凶' ? '用神力弱受制，事多阻碍，宜缓图。'
+          : tn === '无着' ? '卦中无用神也无伏神，此事一时无着落。'
+          : '用神衰绝，事情难成，宜止宜改图。'));
+    }
+
+    return '<div class="card bai-card" style="margin-top:14px">'
+      + '<div class="bai-head"><span class="bai-tag">白 话 解</span>'
+      + '<span class="bai-sub">这一卦怎么看</span></div>'
+      + lines.map(function (t) { return '<p class="bai-text" style="margin:0 0 10px">' + t + '</p>'; }).join('')
+      + '</div>';
+  }
+
+  function bindLyActions(r) {
+    $$('#lyResultBox .ly-yong').forEach(function (b) {
+      b.onclick = function () {
+        var k = b.getAttribute('data-yong');
+        S.lyYong = (S.lyYong === k) ? null : k;
+        lyBuild();
+      };
+    });
+
+    var c = $('#lyCopy');
+    if (c) c.onclick = function () {
+      var t = '【六爻】' + (S.question ? S.question + '\n' : '')
+        + r.ben.name + '（' + r.palaceText + '）' + (r.bian ? ' 变 ' + r.bian.hex.name : '') + '\n'
+        + '日' + r.dayGanZhi + ' 月建' + r.monthZhi + ' 旬空' + r.kong.join('') + '\n';
+      for (var p = 6; p >= 1; p--) {
+        var y = r.yao[p - 1];
+        t += y.liushen + ' ' + y.liuqin + y.ganZhi
+          + (y.shi ? ' 世' : (y.ying ? ' 应' : ''))
+          + (y.moving ? ' 动→' + y.bianLiqin + y.bianGanZhi : '') + '\n';
+      }
+      if (r.yongshen && r.analysis) t += '用神' + r.yongshen + '：' + r.analysis.tone.label + '\n';
+      t += '—— 掐指神通';
+      if (navigator.clipboard && navigator.clipboard.writeText)
+        navigator.clipboard.writeText(t).then(function () { toast('已复制卦式'); }, function () { fallbackCopy(t); });
+      else fallbackCopy(t);
+    };
+
+    var a = $('#lyAgain');
+    if (a) a.onclick = function () {
+      S.lyStates = [];
+      S.lyYong = null;
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      renderLiuyaoPage();
+    };
+  }
+
+  /* ==========================================================
      术法页
      ========================================================== */
   var METHODS = [
     { id: 'liuren', name: '小六壬', desc: '掐指神通。六宫轮转，三步断事，最便最速。', ready: true },
     { id: 'meihua', name: '梅花易数', desc: '以数起卦，体用生克，互卦变卦观终始。', ready: true },
     { id: 'qimen', name: '奇门遁甲', desc: '时家转盘，九宫八门，择时择方。', ready: true },
-    { id: 'liuyao', name: '六爻纳甲', desc: '铜钱摇卦，装卦纳甲，六亲六神断吉凶。' },
+    { id: 'liuyao', name: '六爻纳甲', desc: '铜钱摇卦，装卦纳甲，六亲六神断吉凶。', ready: true },
     { id: 'taiyi', name: '太乙神数', desc: '三式之首，推演国运岁计。' },
     { id: 'zhuge', name: '诸葛神数', desc: '三字数定签，占断人事。' }
   ];
@@ -1851,6 +2189,21 @@
       + '  <p class="hint" style="margin-top:12px;color:#6f7576">\u7248\u672c\u8bf4\u660e\uff1a\u53e6\u6709\u7f6e\u95f0\u6cd5\u3001\u98de\u76d8\u6cd5\u3001\u9634\u76d8\u5947\u95e8\u7b49\uff0c\u8d77\u5c40\u4e0e\u6392\u5e03\u5747\u6709\u51fa\u5165\uff0c\u4e0d\u53ef\u6df7\u7528\u3002</p>'
       + '</div>'
 
+      + '<div class="section-title">六 爻 纳 甲 法 要</div>'
+      + '<div class="card">'
+      + '  <p class="meaning" style="font-size:12.5px">三枚铜钱摇六次，自初爻而上。'
+      + '三背为<b style="color:var(--gold-hi)">老阳</b>（重，动），两背一字为<b style="color:var(--gold-hi)">少阴</b>（拆，静），'
+      + '一背二字为<b style="color:var(--gold-hi)">少阳</b>（单，静），三字为<b style="color:var(--gold-hi)">老阴</b>（交，动）。</p>'
+      + '  <div class="items" style="margin-top:12px">'
+      + '    <div class="item"><div class="k">八宫</div><div class="v">以八纯卦为首，逐爻变而上：本宫、一世至五世、游魂（复变四爻）、归魂（下卦复归）。一卦属何宫，即以该宫五行为「我」。</div></div>'
+      + '    <div class="item"><div class="k">世应</div><div class="v">本宫世六应三，一世世初应四，二世世二应五，三世世三应六，四世世四应初，五世世五应二，游魂世四应初，归魂世三应上。世为己，应为彼。</div></div>'
+      + '    <div class="item"><div class="k">纳甲</div><div class="v">乾纳甲壬、坤纳乙癸、震纳庚、巽纳辛、坎纳戊、离纳己、艮纳丙、兑纳丁。阳卦顺行阳支，阴卦逆行阴支。</div></div>'
+      + '    <div class="item"><div class="k">六亲</div><div class="v">同我者兄弟、生我者父母、我生者子孙、克我者官鬼、我克者妻财。</div></div>'
+      + '    <div class="item"><div class="k">用神</div><div class="v">问财取妻财、问工作取官鬼、问文书房产取父母、问子女取子孙、问同辈取兄弟。用神取错则整卦皆歪，故本作须先点选用神再断。</div></div>'
+      + '    <div class="item"><div class="k">伏神</div><div class="v">本卦六亲不全时，缺者取本宫首卦同位之爻为伏神，压于飞神之下，须得日月生扶或飞神提拔方能出伏。</div></div>'
+      + '  </div>'
+      + '</div>'
+
       + '<div class="section-title">装 到 iPhone</div>'
       + '<div class="card">'
       + '  <div class="steps-guide">'
@@ -1861,7 +2214,7 @@
       + '  </div>'
       + '</div>'
 
-      + '<p class="foot-note">小六壬属道家民间掌诀，梅花易数本于邵雍《梅花易数》，奇门遁甲采时家转盘拆补法。<br>所出断语为传统文化推演，非科学预测，仅供参详与自省，勿据以决大事、代医疗。</p>';
+      + '<p class="foot-note">小六壬属道家民间掌诀，梅花易数本于邵雍《梅花易数》，奇门遁甲采时家转盘拆补法，六爻纳甲依《增删卜易》通行法。<br>所出断语为传统文化推演，非科学预测，仅供参详与自省，勿据以决大事、代医疗。</p>';
   }
 
   /* ==========================================================
@@ -1945,6 +2298,7 @@
     if (S.page === 'cast') {
       if (S.art === 'meihua') { renderMeihuaPage(); gotoBottomFix(); return; }
       if (S.art === 'qimen') { renderQimenPage(); gotoBottomFix(); return; }
+      if (S.art === 'liuyao') { renderLiuyaoPage(); gotoBottomFix(); return; }
       view.innerHTML = castPageHTML();
       setSubtitle();
       $$('#segMethod button').forEach(function (b) {
