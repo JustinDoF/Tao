@@ -17,6 +17,8 @@
   var CP = window.Compass;
   var LY = window.LiuYao;
   var LYD = window.LiuYaoData;
+  var ZG = window.Zhuge;
+  var ZGD = window.ZhugeData;
 
   var $ = function (s, r) { return (r || document).querySelector(s); };
   var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
@@ -40,6 +42,10 @@
     lyStates: [],
     lyYong: null,
     lyResult: null,
+    zgMode: 'char',
+    zgChars: ['', '', ''],
+    zgNums: ['', '', ''],
+    zgResult: null,
     basis: '',
     ts: 0,
     history: [],
@@ -54,7 +60,7 @@
       var d = JSON.parse(raw);
       if (Array.isArray(d.history)) S.history = d.history;
       if (d.settings) S.settings = Object.assign(S.settings, d.settings);
-      if (d.art === 'liuren' || d.art === 'meihua' || d.art === 'qimen' || d.art === 'liuyao') S.art = d.art;
+      if (d.art === 'liuren' || d.art === 'meihua' || d.art === 'qimen' || d.art === 'liuyao' || d.art === 'zhuge') S.art = d.art;
     } catch (e) { /* 忽略 */ }
   }
   function saveStore() {
@@ -733,10 +739,22 @@
           + '<div class="rec-arrow">›</div>'
           + '</div>';
       }
+      if (h.art === 'zhuge') {
+        var zg2 = h.zg || {};
+        var zr = ZG.cast(zg2.chars, zg2.strokes || [1, 1, 1]);
+        return '<div class="rec" data-id="' + h.id + '">'
+          + '<div class="rec-seal zg">' + zr.signNo + '</div>'
+          + '<div class="rec-body">'
+          + '  <div class="rec-q">' + (h.q ? esc(h.q) : '<span style="color:#6f7676">未记所问</span>') + '</div>'
+          + '  <div class="rec-meta">' + fmtDate(h.ts) + ' · 神数 · ' + zr.hex.short
+          + ' · ' + zr.verdict.tone.label + '</div>'
+          + '</div>'
+          + '<div class="rec-arrow">›</div>'
+          + '</div>';
+      }
       var r = R.castFromCounts(h.counts);
       return '<div class="rec" data-id="' + h.id + '">'
-        + '<div class="rec-seal">' + r.main.name + '</div>'
-        + '<div class="rec-body">'
+        + '<div class="rec-seal">' + r.main.name + '</div>'        + '<div class="rec-body">'
         + '  <div class="rec-q">' + (h.q ? esc(h.q) : '<span style="color:#6f7676">未记所问</span>') + '</div>'
         + '  <div class="rec-meta">' + fmtDate(h.ts) + ' · ' + h.mode + ' · ' + r.main.luck.label + '</div>'
         + '</div>'
@@ -770,6 +788,10 @@
       }), { date: new Date(h.ts), yongshen: h.lyYong });
       S.ts = h.ts;
       body = lyResultHTML(lres);
+    } else if (h.art === 'zhuge') {
+      var zg3 = h.zg || {};
+      S.ts = h.ts;
+      body = zgResultHTML(ZG.cast(zg3.chars, zg3.strokes || [1, 1, 1]));
     } else {
       body = resultHTML(R.castFromCounts(h.counts), h.basis, h.q);
     }
@@ -2125,6 +2147,244 @@
   }
 
   /* ==========================================================
+     诸葛神数
+     ========================================================== */
+  function renderZhugePage() {
+    var view = $('#view');
+    view.innerHTML = ''
+      + '<div class="segment" id="zgSeg">'
+      + '  <button data-m="char">三字起课</button>'
+      + '  <button data-m="num">笔画起课</button>'
+      + '</div>'
+      + '<div class="card gold-line">'
+      + '  <div id="zgInputBox"></div>'
+      + '</div>'
+      + '<input class="q-input" id="qInput" maxlength="40" placeholder="所问何事（可略，如：近期可否成事）">'
+      + '<button class="cast-btn" id="zgCastBtn">起　课</button>'
+      + '<div id="zgResultBox"></div>';
+    setSubtitle('诸葛神数 · 三百八十四签');
+
+    $$('#zgSeg button').forEach(function (b) {
+      b.classList.toggle('on', b.getAttribute('data-m') === (S.zgMode || 'char'));
+      b.onclick = function () {
+        S.zgMode = b.getAttribute('data-m');
+        $$('#zgSeg button').forEach(function (x) { x.classList.toggle('on', x === b); });
+        renderZgInput();
+        $('#zgResultBox').innerHTML = '';
+      };
+    });
+    renderZgInput();
+
+    $('#zgCastBtn').onclick = zgDoCast;
+  }
+
+  function renderZgInput() {
+    var box = $('#zgInputBox');
+    if (!box) return;
+    if ((S.zgMode || 'char') === 'char') {
+      box.innerHTML = ''
+        + '<div class="zg-chars">'
+        + '  <input class="zg-char" id="zc0" maxlength="1" placeholder="—" value="' + esc((S.zgChars || [])[0] || '') + '">'
+        + '  <input class="zg-char" id="zc1" maxlength="1" placeholder="—" value="' + esc((S.zgChars || [])[1] || '') + '">'
+        + '  <input class="zg-char" id="zc2" maxlength="1" placeholder="—" value="' + esc((S.zgChars || [])[2] || '') + '">'
+        + '</div>'
+        + '<p class="hint" style="margin-top:12px">心中默念所问之事，随口说出<b>三个字</b>——'
+        + '可以是词语，也可以是任意三字。依次填入，按笔画起课。</p>'
+        + '<p class="hint" style="margin-top:8px;color:#6f7576" id="zgStrokeTip">'
+        + '笔画查不到时，可改用「笔画起课」直接输入。</p>';
+
+      ['zc0', 'zc1', 'zc2'].forEach(function (id, i) {
+        var el = $('#' + id);
+        if (!el) return;
+        el.oninput = function () {
+          var v = this.value.replace(/\s/g, '');
+          this.value = v;
+          if (!S.zgChars) S.zgChars = ['', '', ''];
+          S.zgChars[i] = v;
+          updateZgTip();
+          if (v && i < 2) { var nx = $('#zc' + (i + 1)); if (nx) nx.focus(); }
+        };
+      });
+      updateZgTip();
+    } else {
+      box.innerHTML = ''
+        + '<div class="num-grid">'
+        + '  <div class="num-cell"><span>上卦笔画</span><input id="zn0" inputmode="numeric" maxlength="3" placeholder="—" value="' + esc((S.zgNums || [])[0] || '') + '"></div>'
+        + '  <div class="num-cell"><span>下卦笔画</span><input id="zn1" inputmode="numeric" maxlength="3" placeholder="—" value="' + esc((S.zgNums || [])[1] || '') + '"></div>'
+        + '  <div class="num-cell"><span>动爻笔画</span><input id="zn2" inputmode="numeric" maxlength="3" placeholder="—" value="' + esc((S.zgNums || [])[2] || '') + '"></div>'
+        + '</div>'
+        + '<p class="hint" style="margin-top:12px">三个字的笔画数：一字定<b>上卦</b>，二字定<b>下卦</b>，三字定<b>动爻</b>。</p>';
+      ['zn0', 'zn1', 'zn2'].forEach(function (id, i) {
+        var el = $('#' + id);
+        if (!el) return;
+        el.oninput = function () {
+          var v = this.value.replace(/[^\d]/g, '').slice(0, 3);
+          if (v !== this.value) this.value = v;
+          if (!S.zgNums) S.zgNums = ['', '', ''];
+          S.zgNums[i] = v;
+        };
+      });
+    }
+  }
+
+  function updateZgTip() {
+    var tip = $('#zgStrokeTip');
+    if (!tip) return;
+    var cs = S.zgChars || [];
+    var parts = [];
+    for (var i = 0; i < 3; i++) {
+      if (!cs[i]) continue;
+      var n = ZG.strokeOf(cs[i]);
+      parts.push(cs[i] + (n === null ? '（未收录）' : n + '画'));
+    }
+    if (parts.length) tip.textContent = parts.join('　') + '　—　笔画查不到的字，请改用「笔画起课」。';
+  }
+
+  function zgDoCast() {
+    var q = $('#qInput');
+    S.question = q ? q.value.trim() : '';
+    var chars = null, strokes = null;
+
+    if ((S.zgMode || 'char') === 'char') {
+      var str = (S.zgChars || []).join('');
+      var res = ZG.resolveChars(str);
+      if (!res.ok) {
+        if (res.reason === 'need3') { toast('请填足三个字'); return; }
+        if (res.reason === 'missing') {
+          toast('「' + res.missing.join('、') + '」未收录笔画，请改用笔画起课');
+          return;
+        }
+        return;
+      }
+      chars = res.chars;
+      strokes = res.strokes;
+    } else {
+      var ns = (S.zgNums || []).map(function (x) { return parseInt(String(x).trim(), 10); });
+      if (ns.some(function (n) { return !isFinite(n) || n < 1; })) { toast('请填三个笔画数'); return; }
+      strokes = ns;
+    }
+
+    var r = ZG.cast(chars, strokes);
+    S.zgResult = r;
+    S.ts = Date.now();
+
+    S.history.unshift({
+      id: String(S.ts) + Math.random().toString(36).slice(2, 6),
+      art: 'zhuge',
+      ts: S.ts,
+      q: S.question,
+      mode: '诸葛神数',
+      basis: (chars ? chars.join('') + '（' + strokes.join('/') + '画）' : strokes.join('/') + ' 画')
+        + '　' + r.hex.name + '　第' + r.signNo + '签',
+      zg: { chars: chars, strokes: strokes }
+    });
+    if (S.history.length > 60) S.history.length = 60;
+    saveStore();
+
+    var box = $('#zgResultBox');
+    box.innerHTML = zgResultHTML(r);
+    bindZgActions(r);
+    setTimeout(function () {
+      var y = box.getBoundingClientRect().top + window.scrollY - 74;
+      window.scrollTo({ top: y, behavior: 'smooth' });
+    }, 60);
+  }
+
+  function zgResultHTML(r) {
+    var t = r.verdict.tone;
+
+    return ''
+      + '<div class="result">'
+      + '  <div class="card gold-line zg-card" style="margin-top:16px">'
+      + '    <div class="zg-sign">'
+      + '      <div class="zs-no">第 <b>' + r.signNo + '</b> 签</div>'
+      + '      <div class="zs-of">共 384 签</div>'
+      + '    </div>'
+      + '    <div class="zg-hex">'
+      + '      <div class="zh-name">' + r.hex.name + '</div>'
+      + '      <div class="zh-sub">上' + r.up.name + '下' + r.low.name + '　动' + r.yao.name + '（' + r.yao.pos + '）</div>'
+      + '    </div>'
+      + '    <div class="zg-tone"><span class="luck-tag ' + t.cls + '">' + t.label + '</span></div>'
+      + '    <div class="chips" style="margin-top:12px">'
+      + '      <span class="chip">上卦 <b>' + r.upNum + '</b> ' + r.up.name + '</span>'
+      + '      <span class="chip">下卦 <b>' + r.lowNum + '</b> ' + r.low.name + '</span>'
+      + '      <span class="chip">动爻 <b>' + r.dong + '</b></span>'
+      + '    </div>'
+      + '  </div>'
+
+      + '  <div class="verse-card">'
+      + '    <div class="v-label">卦　辞</div>'
+      + '    <div class="v-text" style="font-size:15px;line-height:1.95">' + esc(r.hex.duan) + '</div>'
+      + '    <div class="verse-seal">神数</div>'
+      + '  </div>'
+
+      + '  <div class="section-title">签　解</div>'
+      + '  <div class="card">'
+      + r.verdict.lines.map(function (x) {
+        return '<p class="meaning" style="margin:0 0 10px">' + x + '</p>';
+      }).join('')
+      + '    <p class="meaning" style="margin-top:4px;color:var(--gold)">' + esc(r.verdict.advice) + '</p>'
+      + '  </div>'
+
+      + (r.verdict.yong
+        ? '<div class="card bai-card" style="margin-top:14px">'
+        + '<div class="bai-head"><span class="bai-tag">怎 么 用</span>'
+        + '<span class="bai-sub">' + r.hex.short + '卦</span></div>'
+        + '<p class="bai-text">' + esc(r.verdict.yong) + '</p>'
+        + '</div>' : '')
+
+      + termsSectionHTML('诸葛神数 签号 笔画起课 上卦 下卦 动爻 先天数 初爻 上爻 '
+        + r.yao.name + ' ' + r.hex.duan + ' ' + r.verdict.lines.join(' ').replace(/<[^>]+>/g, ''))
+
+      + '  <div class="basis" style="margin-top:14px">'
+      + '    <b>起课</b>　' + (r.chars
+        ? r.chars.join(' ') + '　（' + r.strokes.join(' / ') + ' 画）'
+        : r.strokes.join(' / ') + ' 画')
+      + '<br>'
+      + '    <b>算式</b>　上卦 ' + r.strokes[0] + '÷8 余 ' + r.upNum
+      + '，下卦 ' + r.strokes[1] + '÷8 余 ' + r.lowNum
+      + '，动爻 ' + r.strokes[2] + '÷6 余 ' + r.dong + '<br>'
+      + '    <b>签号</b>　(' + r.upNum + '−1)×48 + (' + r.lowNum + '−1)×6 + ' + r.dong
+      + ' = ' + r.signNo + '<br>'
+      + '    <b>所问</b>　' + (S.question ? esc(S.question) : '未填') + '<br>'
+      + '    <b>记时</b>　' + fmtDate(S.ts)
+      + '  </div>'
+
+      + '  <div class="row-actions">'
+      + '    <button id="zgCopy">复制签文</button>'
+      + '    <button id="zgAgain">再起一签</button>'
+      + '  </div>'
+
+      + '  <p class="foot-note">本作三百八十四签，即六十四卦各六爻。'
+      + '断辞取该卦卦辞、白话与所动爻位之义，非传统签诗原文。</p>'
+      + '</div>';
+  }
+
+  function bindZgActions(r) {
+    var c = $('#zgCopy');
+    if (c) c.onclick = function () {
+      var t = '【诸葛神数】第' + r.signNo + '签　' + r.hex.name + '\n'
+        + (S.question ? S.question + '\n' : '')
+        + '上' + r.up.name + '下' + r.low.name + '　动' + r.yao.name + '\n'
+        + '卦辞：' + r.hex.duan + '\n'
+        + r.verdict.lines.join('\n').replace(/<[^>]+>/g, '') + '\n'
+        + r.verdict.advice + '\n—— 掐指神通 · 诸葛神数';
+      if (navigator.clipboard && navigator.clipboard.writeText)
+        navigator.clipboard.writeText(t).then(function () { toast('已复制签文'); }, function () { fallbackCopy(t); });
+      else fallbackCopy(t);
+    };
+
+    var a = $('#zgAgain');
+    if (a) a.onclick = function () {
+      S.zgChars = ['', '', ''];
+      S.zgNums = ['', '', ''];
+      $('#zgResultBox').innerHTML = '';
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      renderZgInput();
+    };
+  }
+
+  /* ==========================================================
      术法页
      ========================================================== */
   var METHODS = [
@@ -2132,8 +2392,8 @@
     { id: 'meihua', name: '梅花易数', desc: '以数起卦，体用生克，互卦变卦观终始。', ready: true },
     { id: 'qimen', name: '奇门遁甲', desc: '时家转盘，九宫八门，择时择方。', ready: true },
     { id: 'liuyao', name: '六爻纳甲', desc: '铜钱摇卦，装卦纳甲，六亲六神断吉凶。', ready: true },
-    { id: 'taiyi', name: '太乙神数', desc: '三式之首，推演国运岁计。' },
-    { id: 'zhuge', name: '诸葛神数', desc: '三字数定签，占断人事。' }
+    { id: 'zhuge', name: '诸葛神数', desc: '三字定签，三百八十四签，一签一爻。', ready: true },
+    { id: 'taiyi', name: '太乙神数', desc: '三式之首，推演国运岁计。' }
   ];
 
   function methodsPageHTML() {
@@ -2204,6 +2464,19 @@
       + '  </div>'
       + '</div>'
 
+      + '<div class="section-title">诸 葛 神 数 法 要</div>'
+      + '<div class="card">'
+      + '  <p class="meaning" style="font-size:12.5px">随手三字，按笔画取卦取爻，共<b style="color:var(--gold-hi)">三百八十四签</b>——'
+      + '即六十四卦各六爻，一卦六爻，六八四十八，八宫相乘得三百八十四。</p>'
+      + '  <div class="items" style="margin-top:12px">'
+      + '    <div class="item"><div class="k">取卦</div><div class="v">第一字笔画 ÷ 8 取余为上卦，第二字 ÷ 8 取余为下卦，第三字 ÷ 6 取余为动爻。余 0 则取满数。</div></div>'
+      + '    <div class="item"><div class="k">签号</div><div class="v">（上卦−1）×48 +（下卦−1）×6 + 动爻，得 1–384。此式可逆，签号亦能反推卦与爻。</div></div>'
+      + '    <div class="item"><div class="k">断法</div><div class="v">先看所得之卦的吉凶，再看动爻所在的爻位——初二为内、四五为外，二五得中为佳，三上处极为忌。</div></div>'
+      + '  </div>'
+      + '  <p class="hint" style="margin-top:12px;color:#6f7576">说明：本作签义取该卦卦辞、白话与所动爻位之义合成，'
+      + '并非传统签诗原文。这样每一签都可追溯、可验算，不会凭空编造。</p>'
+      + '</div>'
+
       + '<div class="section-title">装 到 iPhone</div>'
       + '<div class="card">'
       + '  <div class="steps-guide">'
@@ -2214,7 +2487,7 @@
       + '  </div>'
       + '</div>'
 
-      + '<p class="foot-note">小六壬属道家民间掌诀，梅花易数本于邵雍《梅花易数》，奇门遁甲采时家转盘拆补法，六爻纳甲依《增删卜易》通行法。<br>所出断语为传统文化推演，非科学预测，仅供参详与自省，勿据以决大事、代医疗。</p>';
+      + '<p class="foot-note">小六壬属道家民间掌诀，梅花易数本于邵雍《梅花易数》，奇门遁甲采时家转盘拆补法，六爻纳甲依《增删卜易》通行法，诸葛神数签义取卦辞爻位合成。<br>所出断语为传统文化推演，非科学预测，仅供参详与自省，勿据以决大事、代医疗。</p>';
   }
 
   /* ==========================================================
@@ -2299,6 +2572,7 @@
       if (S.art === 'meihua') { renderMeihuaPage(); gotoBottomFix(); return; }
       if (S.art === 'qimen') { renderQimenPage(); gotoBottomFix(); return; }
       if (S.art === 'liuyao') { renderLiuyaoPage(); gotoBottomFix(); return; }
+      if (S.art === 'zhuge') { renderZhugePage(); gotoBottomFix(); return; }
       view.innerHTML = castPageHTML();
       setSubtitle();
       $$('#segMethod button').forEach(function (b) {

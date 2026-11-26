@@ -1411,6 +1411,77 @@ body::before {
   color: var(--gold-hi);
 }
 
+/* ---------------- 诸葛神数 ---------------- */
+.zg-chars {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+.zg-char {
+  width: 100%;
+  aspect-ratio: 1 / 1.1;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--gold-hi);
+  text-align: center;
+  font-family: var(--serif);
+  font-size: 34px;
+  outline: none;
+  padding: 0;
+  -webkit-appearance: none;
+}
+.zg-char::placeholder { color: rgba(201, 169, 97, 0.22); font-size: 22px; }
+.zg-char:focus { border-color: rgba(201, 169, 97, 0.55); background: rgba(201, 169, 97, 0.08); }
+
+.zg-card { text-align: center; }
+.zg-sign {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line-2);
+}
+.zs-no {
+  font-family: var(--serif);
+  font-size: 15px;
+  letter-spacing: 2px;
+  color: var(--txt-2);
+}
+.zs-no b {
+  font-size: 36px;
+  color: var(--gold-hi);
+  letter-spacing: 1px;
+  margin: 0 3px;
+  font-weight: 600;
+}
+.zs-of {
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: var(--dim);
+  margin-top: 2px;
+}
+.zg-hex { margin-top: 14px; }
+.zh-name {
+  font-family: var(--serif);
+  font-size: 27px;
+  letter-spacing: 5px;
+  color: var(--gold-hi);
+}
+.zh-sub {
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: var(--dim);
+  margin-top: 6px;
+}
+.zg-tone { margin-top: 12px; }
+
+.rec-seal.zg {
+  color: #d8c48a;
+  border-color: rgba(201, 169, 97, 0.3);
+  background: rgba(201, 169, 97, 0.1);
+  font-size: 13px;
+  font-family: var(--sans);
+  letter-spacing: 0;
+}
+
 /* ---------------- 底部导航 ---------------- */
 .tabbar {
   position: fixed;
